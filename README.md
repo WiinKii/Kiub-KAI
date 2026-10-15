@@ -47,3 +47,13 @@ Eventos: `search` (texto buscado al pulsar Enter) y `notifications` (clic en la 
 
 Las rutas de **Comunicaciones** y **Calendario** están como `/comunicaciones` y
 `/calendario` en `navEntries`; cámbialas por tus rutas de Wayfinder.
+
+## KAI · compañero digital (laboratorio)
+
+Primera versión de **KAI**, la presencia viva de Kiub: componente
+`resources/js/components/kai/KaiCharacter.vue` (SVG animado, sin dependencias
+nuevas) y su motor en `resources/js/lib/kai/`. De momento solo se muestra en el
+laboratorio de desarrollo **`/dev/kai`**, que se registra únicamente en local
+(`routes/dev.php`, incluido desde `routes/web.php`).
+
+Estados, API, decisiones técnicas y limitaciones: [`docs/kai.md`](docs/kai.md).
