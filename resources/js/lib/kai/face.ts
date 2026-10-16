@@ -100,14 +100,15 @@ export type MouthShape = {
     cat: number;
 };
 
-export type MouthPaths = { d: string; tongue: string; stroke: number };
+export type MouthPaths = { d: string; stroke: number };
 
 /**
- * Boca como una lente: labio superior y labio inferior. Cerrada, los dos
- * coinciden y se ve como un trazo; abierta, se rellena por dentro.
+ * Boca minimalista: un solo trazo blanco, del mismo estilo que los ojos.
+ * Cerrada es una curva («◡», «ω», ondulada); al abrirse, el trazo se separa
+ * en dos labios y dibuja una «o» pequeña, sin relleno.
  */
 export function mouthPath(m: MouthShape): MouthPaths {
-    const w = R * 0.17 * Math.max(0.3, m.wide);
+    const w = R * 0.13 * Math.max(0.3, m.wide);
     const steps = 12;
     const top: [number, number][] = [];
     const bottom: [number, number][] = [];
@@ -115,16 +116,17 @@ export function mouthPath(m: MouthShape): MouthPaths {
 
     for (let i = 0; i <= steps; i++) {
         const t = i / steps;
-        const x = (t - 0.5) * w;
+        // Al abrirse se estrecha: una «o», no una sonrisa enorme.
+        const x = (t - 0.5) * w * (1 - 0.2 * Math.min(1, open));
         const arc = 4 * t * (1 - t);
-        let y = m.smile * 0.3 * w * arc;
+        let y = m.smile * 0.32 * w * arc * (1 - 0.6 * Math.min(1, open));
         y += m.cat * 0.16 * w * Math.abs(Math.sin(2 * Math.PI * t));
-        y += m.wave * 0.08 * w * Math.sin(4 * Math.PI * t);
-        top.push([x, y - open * 0.08 * w * arc]);
-        bottom.push([
-            x,
-            y + open * 0.62 * w * Math.pow(Math.sin(Math.PI * t), 0.8),
-        ]);
+        y += m.wave * 0.09 * w * Math.sin(4 * Math.PI * t);
+        // La altura depende solo de cuánto se abre (un bostezo se lee como
+        // tal) y el perfil redondeado hace una «o», no una semilla.
+        const lip = open * R * 0.1 * Math.pow(Math.sin(Math.PI * t), 0.5);
+        top.push([x, y - lip * 0.45]);
+        bottom.push([x, y + lip * 0.55]);
     }
 
     let d = `M${n2(top[0][0])} ${n2(top[0][1])}`;
@@ -133,13 +135,13 @@ export function mouthPath(m: MouthShape): MouthPaths {
         d += `L${n2(top[i][0])} ${n2(top[i][1])}`;
     }
 
-    for (let i = steps; i >= 0; i--) {
-        d += `L${n2(bottom[i][0])} ${n2(bottom[i][1])}`;
+    if (open > 0.02) {
+        for (let i = steps - 1; i >= 0; i--) {
+            d += `L${n2(bottom[i][0])} ${n2(bottom[i][1])}`;
+        }
+
+        d += 'Z';
     }
 
-    const ty = bottom[steps / 2][1];
-    const tr = w * 0.22 * Math.min(1, open * 1.4);
-    const tongue = `M${n2(-tr)} ${n2(ty)}A${n2(tr)} ${n2(tr * 0.75)} 0 0 1 ${n2(tr)} ${n2(ty)}Z`;
-
-    return { d: `${d}Z`, tongue, stroke: R * 0.036 };
+    return { d, stroke: R * 0.03 };
 }

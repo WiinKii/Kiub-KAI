@@ -123,5 +123,7 @@ export function paletteVars(colors: KaiColors): Record<string, string> {
         '--kai-ice': mix(mix(primary, '#8fe3ff', 0.45), '#ffffff', 0.15),
         '--kai-orchid': mix(accent, blush, 0.35),
         '--kai-sheen': mix(mix(primary, '#8fe3ff', 0.45), '#ffffff', 0.62),
+        // Globito de avisos: el rubor llevado a un rosa intenso, legible.
+        '--kai-badge': mix(blush, '#ff2e6e', 0.62),
     };
 }

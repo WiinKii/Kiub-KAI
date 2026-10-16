@@ -29,15 +29,19 @@ En el laboratorio:
 - **KAI flotante**: el compañero abajo a la derecha, con sus tamaños, el
   estiramiento al final del scroll y el tiempo hasta que se duerme (nunca,
   30 s o 2 min).
-- **Juegos**: da vueltas con el cursor alrededor de KAI hasta marearlo; un clic
-  le hace cosquillas.
+- **Juegos**: da vueltas con el cursor alrededor de KAI hasta marearlo,
+  arrástralo para estirarlo como gelatina; un clic le hace cosquillas.
+- **Chat guiado (sin IA)**: simula la sección de la intranet en la que estás,
+  recibe avisos de ejemplo y prueba el chat del KAI flotante. En el
+  laboratorio los enlaces no navegan: se anota qué abrirían.
 
 ## Archivos
 
 | Archivo | Responsabilidad |
 | --- | --- |
 | `resources/js/components/kai/KaiCharacter.vue` | Dibujo SVG, ciclo de vida, juegos, accesibilidad y API pública. |
-| `resources/js/components/kai/KaiDock.vue` | Compañero flotante abajo a la derecha (mínimo / normal / grande). |
+| `resources/js/components/kai/KaiDock.vue` | Compañero flotante abajo a la derecha (mínimo / normal / grande), chat, avisos y señalar elementos. |
+| `resources/js/components/kai/KaiChat.vue` | Panel del chat guiado: conversación, opciones, pasos, acciones y buscador. |
 | `resources/js/components/kai/useKaiOverscroll.ts` | Estiramiento elástico de la página al llegar al final del scroll. |
 | `resources/js/lib/kai/engine.ts` | Motor: transiciones, rigs, satélites (lóbulos, manos, gotas), partículas y composición del fotograma. |
 | `resources/js/lib/kai/field.ts` | Campo de metabolas y contorno (marching squares + spline). |
@@ -45,6 +49,7 @@ En el laboratorio:
 | `resources/js/lib/kai/face.ts` | Ojos (cápsula, «◠», «◡», «—»), espiral, corazón y boca. |
 | `resources/js/lib/kai/sprites.ts` | Partículas: notas, corazones, zetas, estrellas, puntos. |
 | `resources/js/lib/kai/palette.ts` | Colores, preajustes y tonos derivados (`--kai-*`). |
+| `resources/js/lib/kai/guide.ts` | Contenido del chat por sección (de ejemplo), búsqueda por palabras y sección según la URL. |
 | `resources/js/lib/kai/motion.ts` | Canales de pose, muelles y tiempos. |
 | `resources/js/lib/kai/states.ts` | Estados y reacciones: pose, cues y rig de cada uno. |
 | `resources/js/lib/kai/ticker.ts` | Un único `requestAnimationFrame` compartido por todas las instancias. |
@@ -64,6 +69,9 @@ No añade dependencias: usa Vue, `@vueuse/core` (ya presente en el proyecto) y S
   spline: por eso las manos brotan del cuerpo, se estiran, se desprenden y
   vuelven a fundirse sin costuras. Cada satélite tiene su caída en el campo:
   baja se funde ancho; alta deja un cuello visible (manos, lóbulos).
+- **Contorno estable.** La rejilla del campo viaja anclada al cuerpo y el
+  contorno se suaviza antes de aligerarse, sin depender del punto de inicio:
+  al flotar, el borde no «hierve» (la mitad de temblor que antes a 300 px).
 - **Rigs.** Cada estado y reacción tiene una función que, en cada fotograma,
   pide los satélites que necesita (posición, tamaño, muelle) y emite
   partículas. Los que deja de pedir se reabsorben solos, así que cualquier
@@ -72,7 +80,10 @@ No añade dependencias: usa Vue, `@vueuse/core` (ya presente en el proyecto) y S
   su objetivo con muelles amortiguados y desfasados entre sí. Además flota, deriva
   despacio, se inclina con la inercia al moverse y se aplasta al aterrizar.
   Parpadea a veces dos veces seguidas y suele parpadear al cambiar mucho la
-  mirada; en reposo largo, cada 20–30 s hace un gesto breve y distinto.
+  mirada; en reposo largo, cada 20–30 s hace un gesto breve y distinto. La
+  flotación combina dos armónicos y el cuerpo se estira al subir y se ensancha
+  al bajar. La física va en pasos fijos y el dibujo extrapola el resto del
+  paso: sin tirones en pantallas de 90, 120 o 144 Hz.
 - **Material de vidrio.** Degradado iridiscente derivado de los colores
   elegidos (cielo en el centro → azul → violeta en el borde) y cuatro manchas de
   color (violeta, cielo, profundo, orquídea) que orbitan con paralaje. Como en
@@ -84,7 +95,8 @@ No añade dependencias: usa Vue, `@vueuse/core` (ya presente en el proyecto) y S
 - **Rostro.** Los ojos viven sobre una esfera (giran con escorzo al mirar a los
   lados) y cambian de forma: cápsula, «◠» alegre, «◡» contento, «—» cerrado,
   guiño, espiral y corazón. Rubor bajo los ojos que aparece en las emociones.
-  Boca opcional: sonrisa, «o», bostezo, ondulada y «:3».
+  Boca opcional y minimalista: un solo trazo blanco, como los ojos («◡»,
+  «ω», ondulada) que se abre en una «o» pequeña, sin relleno.
 
 ### Por qué SVG
 
@@ -130,7 +142,13 @@ const tamano = ref<KaiDockSize>('normal');
 
 <template>
     <!-- En el layout de la intranet, una sola vez. -->
-    <KaiDock v-model:state="estado" v-model:size="tamano" />
+    <KaiDock
+        v-model:state="estado"
+        v-model:size="tamano"
+        :notices="avisos"
+        @read="(ids) => marcarLeidos(ids)"
+        @navigate="(href, event) => { event.preventDefault(); router.visit(href); }"
+    />
 </template>
 ```
 
@@ -142,13 +160,42 @@ const tamano = ref<KaiDockSize>('normal');
 | `stretchTarget` | `() => HTMLElement \| null` | `<main>` | Elemento que sube durante el estiramiento. |
 | `sleepAfter` | `number` | `90` | Segundos sin actividad (ratón, teclado, scroll, toques) hasta que se duerme; `0` = nunca. Solo tapa el reposo: cualquier estado real lo despierta. Al volver el usuario, despierta con un bostezo. |
 | `greet` | `boolean` | `true` | Saluda una vez por sesión al aparecer (se recuerda en `sessionStorage`). |
+| `chat` | `boolean` | `true` | Pulsarlo abre el chat guiado (KAI pasa a ser un botón con nombre accesible). |
+| `guide` | `KaiGuide` | `KIUB_GUIDE` | Contenido del chat (`lib/kai/guide.ts`). |
+| `section` | `string` | `''` | Sección actual (id de la guía). Vacío: se deduce de la URL al abrir el chat. |
+| `notices` | `KaiNotice[]` | `[]` | Avisos sin leer: globito con el número sobre KAI, estado «Aviso» y primer mensaje del chat. |
 | `colors`, `mouth`, `intensity`, `paused`, `reducedMotion` | — | — | Igual que en `KaiCharacter`. |
 
 Además, mira al cursor cuando se acerca y, al desplazarse la página, la masa
 se mece como gelatina y mira un momento hacia el contenido.
 
+Eventos: `navigate` (`href`, `event`; un enlace del chat; con
+`event.preventDefault()` se navega con Inertia) y `read` (ids de los avisos que
+el usuario ha visto; la app decide si los marca como leídos).
+
 Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
-`track`, etc., y `asleep` (si está dormido).
+`track`, etc., `asleep` (si está dormido), `chatOpen`, `openChat()` y
+`closeChat()`.
+
+### Chat guiado
+
+Sin IA: es una guía escrita. Al abrirlo, KAI saluda según la sección (o enseña
+primero los avisos) y ofrece temas como botones. Cada respuesta puede llevar
+pasos numerados y acciones: abrir otro tema, ir a una página o **señalar un
+elemento de la pantalla** (un anillo lo rodea y KAI saca una manita hacia
+él). Incluye un recorrido por la barra superior y un buscador por palabras
+(sin acentos ni mayúsculas); si no encuentra nada, lo dice. KAI «escribe»
+(expresión de pensar) un momento proporcional a la respuesta, asiente al
+contestar y mira la conversación.
+
+- Accesible: diálogo no modal con título, conversación como `role="log"`
+  (`aria-live="polite"`), opciones como botones, foco al panel al abrir;
+  Escape lo cierra y devuelve el foco a KAI. Sin animaciones con movimiento
+  reducido.
+- KAI no hace gestiones por el usuario: le guía. El contenido de
+  `KIUB_GUIDE` es de ejemplo; hay que ajustarlo a los módulos reales.
+- La sección se deduce del prefijo de la URL (`paths` de cada sección) o se
+  pasa con `section`.
 
 ### Props de `KaiCharacter`
 
@@ -160,7 +207,9 @@ Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
 | `mouth` | `boolean` | `false` | Boca integrada en estados y reacciones. |
 | `blush` | `boolean` | `true` | Rubor en las emociones. |
 | `ambient` | `boolean` | `true` | Lóbulos y motas en reposo (apagar en tamaños mínimos). |
-| `playful` | `boolean` | `false` | Juegos: marearlo dando vueltas con el cursor y cosquillas al pulsarlo. |
+| `playful` | `boolean` | `false` | Juegos: marearlo dando vueltas con el cursor, estirarlo arrastrándolo y cosquillas al pulsarlo. |
+| `tickle` | `boolean` | `true` | Con `playful`, pulsarlo le hace cosquillas (el dock lo apaga: el clic abre el chat). |
+| `badge` | `number \| string \| boolean` | `false` | Globito de avisos arriba a la derecha, sobre el cuerpo (viaja con la gelatina): número (9+ desde 10), texto corto o `true` para un punto. |
 | `pull` | `number` | `0` | Estiramiento vertical externo (0–1), por ejemplo el del scroll. |
 | `animateSize` | `boolean` | `false` | Cambios de `size` con transición. |
 | `intensity` | `number` | `1` | Amplitud de los gestos (0–1.5). |
@@ -181,6 +230,7 @@ Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
 | `lookAt({ x, y } \| null)` | Dirige la mirada (-1…1) o la libera. |
 | `blink()`, `pause()`, `resume()` | Parpadeo puntual y pausa manual. |
 | `nudge(vx, vy)` | Empujón elástico externo, en radios/s: la masa se desplaza, se deforma por inercia y vuelve con rebote. Se ignora con movimiento reducido. |
+| `point({ x, y } \| null)` | Saca una manita hacia una dirección de la pantalla (y mira hacia allí), o la recoge. |
 
 ### Atributos
 
@@ -210,6 +260,7 @@ fotograma: sirven para estilos y pruebas.
 | Escuchando música | `music` | Se balancea y se desplaza al ritmo; le salen notas en ráfagas. |
 | Dormido | `sleeping` | Respira hondo, se asienta y suelta zetas. |
 | Tímido | `shy` | Se encoge, se sonroja, pone las manitas junto a las mejillas y mira de reojo. |
+| Aviso | `notice` | Tiene algo para ti: mira el globito, alza una manita a su lado, te mira y da un saltito de vez en cuando. El KAI flotante lo usa solo con avisos pendientes. |
 
 ## Reacciones
 
@@ -222,10 +273,11 @@ fotograma: sirven para estilos y pruebas.
 | Encantado | `love` | Ojos de corazón, rubor y corazones. |
 | Cosquillas | `giggle` | Se sacude de risa. También al pulsarlo (con `playful`). |
 | ¡Idea! | `idea` | Una gota salta por arriba y vuelve como antena. |
-| Mareado | `dizzy` | Ojos de espiral, tambaleo y estrellas en órbita. |
+| Mareado | `dizzy` | Cuerpo completo: «¡uy!», tambaleo en ocho con el fluido chapoteando alrededor, traspié que lo aplasta como un charco (con salpicadura), sacudida con los ojos apretados y un saltito de alivio. Estrellas en órbita y ojos de espiral. |
 | Explorar | `explore` | Viaja a un lado con una gota rezagada y vuelve. |
 | Bostezo | `yawn` | Se estira hacia arriba con la boca muy abierta. |
 | Rebote | `boing` | Aplastamiento y estiramiento rápido (también al cambiar de tamaño). |
+| Asentir | `nod` | Asiente dos veces, con mirada amable: «entendido» (lo usa el chat al responder). |
 
 Reglas de transición:
 
@@ -240,10 +292,15 @@ Reglas de transición:
 
 ## Juegos
 
-- **Marearlo**: con `playful`, si el cursor da unas dos vueltas y media
-  seguidas alrededor de KAI (dentro de una zona cercana), se marea unos
-  segundos. Después descansa 5 s antes de poder marearse otra vez. El listener
-  es pasivo y solo existe mientras KAI es visible.
+- **Marearlo**: con `playful`, hay que dar unas cuatro vueltas netas seguidas
+  alrededor de KAI (dentro de una zona cercana). Desde la primera vuelta se
+  nota: el fluido chapotea hacia el cursor, el cuerpo se tambalea cada vez más
+  y los ojos se entornan; al completarlas, se marea. Después descansa 6 s. El
+  listener es pasivo y solo existe mientras KAI es visible.
+- **Estirarlo**: arrástralo y le sale una mano unida por un hilo de fluido que
+  sigue al puntero (hasta 2,3 radios), con el cuerpo cediendo hacia el tirón;
+  al soltar, la masa corre hacia allí y vuelve con rebote. Soltar tras
+  arrastrar no cuenta como clic.
 - **Cosquillas**: un clic o toque lo hace reír.
 - **Mirada**: también con `playful`, mira al cursor cuando pasa cerca (hasta
   ~300–560 px según su tamaño).
@@ -261,8 +318,9 @@ Reglas de transición:
 - La animación se detiene fuera de la vista (IntersectionObserver), con la
   pestaña oculta y en pausa. Todas las instancias comparten un único
   `requestAnimationFrame`; con más de cuatro activas, las pequeñas van a 30 fps.
-- Coste medido en Chromium: ~0,6 ms por fotograma en reposo a 300 px, ~0,2 ms
-  a 112 px; la galería del laboratorio (25 instancias) se mantiene en ~56–60 fps.
+- Coste medido en Chromium: ~0,7 ms por fotograma en reposo a 300 px, ~0,3 ms
+  a 112 px; un KAI solo va a 60 fps y la galería del laboratorio (27
+  instancias animadas a la vez) a ~56–57 fps.
 - Con movimiento reducido no hay gelatina con el scroll ni estiramiento; el
   saludo y el sueño se leen solo por la expresión.
 
@@ -284,7 +342,13 @@ Reglas de transición:
   táctil al final de la página. Arrastrar la barra de desplazamiento o pulsar
   `Fin` no lo activa.
 - **Integración.** El compañero flotante solo se monta en el laboratorio.
-  Para la intranet basta con añadir `<KaiDock>` una vez en el layout principal.
+  Para la intranet basta con añadir `<KaiDock>` una vez en el layout principal,
+  pasarle los avisos reales y navegar con Inertia en `navigate`.
+- **Chat.** Es una guía escrita, no entiende lenguaje libre: el buscador
+  compara palabras. El contenido de `KIUB_GUIDE` (rutas, nombres de módulos y
+  pasos) es de ejemplo y hay que revisarlo con cada área. «Muéstrame dónde»
+  solo encuentra elementos visibles; en móvil, los del menú ☰ no lo están y
+  KAI lo dice.
 - **Validación.** Probado en Chromium (escritorio y móvil emulado) sobre el
   starter kit oficial de Laravel + Inertia v3 + Vue con `AppHeader.vue`, porque
   este repositorio es un extracto. Falta comprobarlo en Safari y Firefox y en el

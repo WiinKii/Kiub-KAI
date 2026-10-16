@@ -7,6 +7,7 @@ import { Head } from '@inertiajs/vue3';
 import { useMediaQuery, usePreferredReducedMotion } from '@vueuse/core';
 import {
     computed,
+    nextTick,
     onBeforeUnmount,
     onMounted,
     reactive,
@@ -16,6 +17,7 @@ import {
 import KaiCharacter from '@/components/kai/KaiCharacter.vue';
 import KaiDock from '@/components/kai/KaiDock.vue';
 import KaiHelpDemo from '@/components/kai/lab/KaiHelpDemo.vue';
+import KaiLabChat from '@/components/kai/lab/KaiLabChat.vue';
 import KaiLabControls from '@/components/kai/lab/KaiLabControls.vue';
 import KaiLabGallery from '@/components/kai/lab/KaiLabGallery.vue';
 import KaiLabSizes from '@/components/kai/lab/KaiLabSizes.vue';
@@ -31,6 +33,8 @@ import {
     useKaiSequence,
 } from '@/components/kai/lab/useKaiSequence';
 import { REACTION_CATALOG, STATE_CATALOG } from '@/lib/kai/catalog';
+import { KIUB_GUIDE } from '@/lib/kai/guide';
+import type { KaiNotice } from '@/lib/kai/guide';
 import { activeTicks } from '@/lib/kai/ticker';
 import type { KaiReaction, KaiReactionResult, KaiState } from '@/lib/kai/types';
 
@@ -49,6 +53,59 @@ const reaction = ref<KaiReaction | null>(null);
 const kai = ref<InstanceType<typeof KaiCharacter> | null>(null);
 const sizes = ref<InstanceType<typeof KaiLabSizes> | null>(null);
 const stage = ref<HTMLElement | null>(null);
+const dock = ref<InstanceType<typeof KaiDock> | null>(null);
+
+/* ── Chat guiado del KAI flotante ──────────────────────────────────── */
+const chatSection = ref('');
+const notices = ref<KaiNotice[]>([]);
+const chatEvents = ref<string[]>([]);
+let noticeId = 0;
+
+// Avisos de ejemplo para probar el globito y el chat.
+const SAMPLE_NOTICES: Omit<KaiNotice, 'id'>[] = [
+    {
+        title: 'Tu solicitud de vacaciones fue revisada',
+        text: 'Ejemplo · del 14 al 18 de octubre.',
+        href: '/rrhh/vacaciones',
+    },
+    {
+        title: 'Nuevo comunicado de Dirección',
+        text: 'Ejemplo · horario especial de aniversario.',
+        href: '/comunicaciones',
+    },
+    {
+        title: 'Recordatorio: reunión de equipo',
+        text: 'Ejemplo · mañana a las 10:00.',
+        href: '/calendario',
+    },
+];
+
+function addNotice() {
+    const sample = SAMPLE_NOTICES[noticeId % SAMPLE_NOTICES.length];
+    notices.value = [
+        ...notices.value,
+        { id: `aviso-${++noticeId}`, ...sample },
+    ];
+}
+
+function readNotices(ids: string[]) {
+    notices.value = notices.value.filter((n) => !ids.includes(n.id));
+}
+
+async function openChat() {
+    settings.dock = true;
+    await nextTick();
+    dock.value?.openChat();
+}
+
+// En el laboratorio no se navega: se anota qué abriría en la intranet.
+function onNavigate(href: string, event: MouseEvent) {
+    event.preventDefault();
+    chatEvents.value = [
+        `En la intranet abriría ${href}`,
+        ...chatEvents.value,
+    ].slice(0, 5);
+}
 
 const compact = useMediaQuery('(max-width: 640px)');
 const systemMotion = usePreferredReducedMotion();
@@ -334,6 +391,18 @@ onBeforeUnmount(() => {
             </aside>
         </div>
 
+        <KaiLabChat
+            v-model:section="chatSection"
+            class="kl-section"
+            :sections="KIUB_GUIDE.sections"
+            :notices="notices"
+            :dock-on="settings.dock"
+            :events="chatEvents"
+            @open="openChat"
+            @notify="addNotice"
+            @clear="notices = []"
+        />
+
         <KaiLabGallery class="kl-section" :settings="settings" />
         <KaiLabSizes
             ref="sizes"
@@ -362,6 +431,7 @@ await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pr
     <Teleport to="body">
         <KaiDock
             v-if="settings.dock"
+            ref="dock"
             v-model:state="dockState"
             v-model:size="settings.dockSize"
             data-dock
@@ -373,6 +443,10 @@ await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pr
             :overscroll="settings.overscroll"
             :sleep-after="settings.dockSleep"
             :stretch-target="() => labRoot"
+            :section="chatSection"
+            :notices="notices"
+            @navigate="onNavigate"
+            @read="readNotices"
         />
     </Teleport>
 </template>

@@ -21,7 +21,8 @@ export type KaiState =
     | 'content'
     | 'music'
     | 'sleeping'
-    | 'shy';
+    | 'shy'
+    | 'notice';
 
 export type KaiReaction =
     | 'welcome'
@@ -34,7 +35,8 @@ export type KaiReaction =
     | 'dizzy'
     | 'explore'
     | 'yawn'
-    | 'boing';
+    | 'boing'
+    | 'nod';
 
 /** Dirección de la mirada; cada eje va de -1 a 1 (y positivo hacia abajo). */
 export type KaiGaze = { x: number; y: number };
@@ -84,6 +86,8 @@ export type KaiController = {
     blink: () => void;
     /** Empujón elástico externo, en radios/s (se ignora en movimiento reducido). */
     nudge: (vx: number, vy: number) => void;
+    /** Señala con una manita hacia una dirección (pantalla); `null` la recoge. */
+    point: (dir: KaiGaze | null) => void;
     pause: () => void;
     resume: () => void;
 };

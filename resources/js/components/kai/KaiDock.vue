@@ -9,6 +9,10 @@
  * Presencia: saluda una vez por sesión, se mece como gelatina cuando la
  * página se desplaza (y mira el contenido), y se duerme tras un rato sin
  * actividad; al volver el usuario, despierta con un bostezo.
+ *
+ * Al pulsarlo abre el chat guiado de la sección actual. Los avisos se
+ * muestran en un globito sobre su cuerpo y en el chat; KAI señala con una
+ * manita los elementos de la página de los que habla.
  */
 import {
     useEventListener,
@@ -21,11 +25,20 @@ import {
     onBeforeUnmount,
     onMounted,
     ref,
+    useId,
     watch,
 } from 'vue';
+import { KIUB_GUIDE, sectionFromUrl } from '@/lib/kai/guide';
+import type { KaiGuide, KaiNotice } from '@/lib/kai/guide';
 import type { KaiColors } from '@/lib/kai/palette';
-import type { KaiDockSize, KaiReducedMotion, KaiState } from '@/lib/kai/types';
+import type {
+    KaiDockSize,
+    KaiReaction,
+    KaiReducedMotion,
+    KaiState,
+} from '@/lib/kai/types';
 import KaiCharacter from './KaiCharacter.vue';
+import KaiChat from './KaiChat.vue';
 import { useKaiOverscroll } from './useKaiOverscroll';
 
 type Props = {
@@ -42,6 +55,14 @@ type Props = {
     sleepAfter?: number;
     /** Saluda una vez por sesión al aparecer. */
     greet?: boolean;
+    /** Pulsarlo abre el chat guiado. */
+    chat?: boolean;
+    /** Contenido del chat. */
+    guide?: KaiGuide;
+    /** Sección actual (id de la guía); vacío = según la URL. */
+    section?: string;
+    /** Avisos sin leer: globito sobre KAI y primer mensaje del chat. */
+    notices?: KaiNotice[];
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -54,7 +75,18 @@ const props = withDefaults(defineProps<Props>(), {
     stretchTarget: () => document.querySelector<HTMLElement>('main'),
     sleepAfter: 90,
     greet: true,
+    chat: true,
+    guide: () => KIUB_GUIDE,
+    section: '',
+    notices: () => [],
 });
+
+const emit = defineEmits<{
+    /** Enlace del chat; `event.preventDefault()` para navegar con Inertia. */
+    navigate: [href: string, event: MouseEvent];
+    /** El usuario ha visto estos avisos. */
+    read: [ids: string[]];
+}>();
 
 const state = defineModel<KaiState>('state', { default: 'idle' });
 const size = defineModel<KaiDockSize>('size', { default: 'normal' });
@@ -102,10 +134,158 @@ watch(size, () => {
 const asleep = ref(false);
 let lastActivity = Date.now();
 
-// Dormido solo «tapa» el reposo: cualquier estado real lo despierta.
-const shown = computed<KaiState>(() =>
-    asleep.value && state.value === 'idle' ? 'sleeping' : state.value,
+/* ── Chat ────────────────────────────────────────────────────────────── */
+const chatOpen = ref(false);
+const typing = ref(false);
+const trigger = ref<HTMLElement | null>(null);
+const chatId = useId();
+const currentSection = ref(props.section);
+
+// Los estados de presencia solo «tapan» el reposo: un estado real (trabajando,
+// error…) siempre se ve.
+const shown = computed<KaiState>(() => {
+    if (state.value !== 'idle') {
+        return state.value;
+    }
+
+    if (chatOpen.value) {
+        return typing.value ? 'thinking' : 'attentive';
+    }
+
+    if (asleep.value) {
+        return 'sleeping';
+    }
+
+    return props.notices.length ? 'notice' : 'idle';
+});
+
+function openChat() {
+    if (!props.chat) {
+        return;
+    }
+
+    currentSection.value =
+        props.section || sectionFromUrl(props.guide, window.location.pathname);
+    asleep.value = false;
+    chatOpen.value = true;
+    lookAtChat();
+}
+
+// Mientras habláis, mira la conversación (arriba a la izquierda).
+function lookAtChat() {
+    if (chatOpen.value && !spotTarget) {
+        kai.value?.lookAt({ x: -0.5, y: -0.65 });
+    }
+}
+
+function closeChat() {
+    chatOpen.value = false;
+    typing.value = false;
+    stopSpot();
+    void nextTick(() => trigger.value?.focus());
+}
+
+function toggleChat() {
+    if (chatOpen.value) {
+        closeChat();
+    } else {
+        openChat();
+    }
+}
+
+function onTyping(value: boolean) {
+    typing.value = value;
+}
+
+function onGesture(name: KaiReaction) {
+    // Tras aplicar el cambio de expresión (pensar → atender), que si no
+    // cortaría el gesto.
+    void nextTick(() => kai.value?.react(name));
+}
+
+watch(
+    () => props.section,
+    (section) => {
+        if (section) {
+            currentSection.value = section;
+        }
+    },
 );
+
+const triggerLabel = computed(() => {
+    const count = props.notices.length;
+    const notices = count
+        ? `, ${count} ${count === 1 ? 'aviso nuevo' : 'avisos nuevos'}`
+        : '';
+
+    return `${chatOpen.value ? 'Cerrar' : 'Abrir'} la ayuda de KAI${notices}`;
+});
+
+// Llega un aviso: KAI despierta y da un saltito para que se note.
+watch(
+    () => props.notices.length,
+    (count, before) => {
+        if (count > (before ?? 0)) {
+            asleep.value = false;
+            lastActivity = Date.now();
+        }
+    },
+);
+
+/* ── Señalar elementos de la página ──────────────────────────────────── */
+type Spot = { x: number; y: number; w: number; h: number };
+const spot = ref<Spot | null>(null);
+let spotTarget: HTMLElement | null = null;
+let spotUntil = 0;
+let spotFrame = 0;
+
+function showElement(el: HTMLElement) {
+    spotTarget = el;
+    spotUntil = performance.now() + 3800;
+    el.scrollIntoView({
+        block: 'nearest',
+        behavior: reduced.value ? 'auto' : 'smooth',
+    });
+    window.cancelAnimationFrame(spotFrame);
+    followSpot();
+}
+
+function stopSpot() {
+    window.cancelAnimationFrame(spotFrame);
+    spot.value = null;
+    spotTarget = null;
+    kai.value?.point(null);
+    kai.value?.lookAt(null);
+    lookAtChat();
+}
+
+// Sigue al elemento (por si la página se mueve) y KAI lo señala.
+function followSpot() {
+    if (!spotTarget || performance.now() > spotUntil) {
+        stopSpot();
+
+        return;
+    }
+
+    const r = spotTarget.getBoundingClientRect();
+    spot.value = {
+        x: r.left - 6,
+        y: r.top - 6,
+        w: r.width + 12,
+        h: r.height + 12,
+    };
+    const body = trigger.value?.getBoundingClientRect();
+
+    if (body) {
+        const dx = r.left + r.width / 2 - (body.left + body.width / 2);
+        const dy = r.top + r.height / 2 - (body.top + (body.height * 80) / 144);
+        const d = Math.hypot(dx, dy) || 1;
+        kai.value?.point({ x: dx / d, y: dy / d });
+        kai.value?.lookAt({ x: dx / d, y: dy / d });
+    }
+
+    spotFrame = window.requestAnimationFrame(followSpot);
+}
 
 function onState(next: KaiState) {
     if (asleep.value && next === 'sleeping') {
@@ -138,6 +318,8 @@ useIntervalFn(() => {
         props.sleepAfter > 0 &&
         !asleep.value &&
         !props.paused &&
+        !chatOpen.value &&
+        !props.notices.length &&
         state.value === 'idle' &&
         Date.now() - lastActivity > props.sleepAfter * 1000
     ) {
@@ -165,7 +347,10 @@ useEventListener(
         kai.value.nudge(0, Math.max(-1.2, Math.min(1.2, -dy * 0.012)));
         kai.value.lookAt({ x: -0.55, y: dy > 0 ? 0.15 : -0.5 });
         window.clearTimeout(lookTimer);
-        lookTimer = window.setTimeout(() => kai.value?.lookAt(null), 800);
+        lookTimer = window.setTimeout(() => {
+            kai.value?.lookAt(null);
+            lookAtChat();
+        }, 800);
     },
     { passive: true },
 );
@@ -201,21 +386,64 @@ onMounted(() => {
 onBeforeUnmount(() => {
     window.clearTimeout(lookTimer);
     window.clearTimeout(greetTimer);
+    window.cancelAnimationFrame(spotFrame);
 });
 
-/** `dock.value?.kai?.react('welcome')`, `track(...)`, etc. */
-defineExpose({ kai, asleep });
+/** `dock.value?.kai?.react('welcome')`, `track(...)`, `openChat()`, etc. */
+defineExpose({ kai, asleep, chatOpen, openChat, closeChat });
 </script>
 
 <template>
     <div class="kai-dock" :data-size="size">
-        <div class="kai-dock-body">
+        <div
+            v-if="spot"
+            class="kai-dock-spot"
+            aria-hidden="true"
+            :style="{
+                left: `${spot.x}px`,
+                top: `${spot.y}px`,
+                width: `${spot.w}px`,
+                height: `${spot.h}px`,
+            }"
+        />
+        <Transition name="kai-chat">
+            <KaiChat
+                v-if="chat"
+                v-show="chatOpen"
+                :id="chatId"
+                class="kai-dock-chat"
+                :open="chatOpen"
+                :guide="guide"
+                :section="currentSection"
+                :notices="notices"
+                :reduced-motion="reduced"
+                @close="closeChat"
+                @typing="onTyping"
+                @gesture="onGesture"
+                @show="showElement"
+                @navigate="(href, event) => emit('navigate', href, event)"
+                @read="(ids) => emit('read', ids)"
+            />
+        </Transition>
+        <component
+            :is="chat ? 'button' : 'div'"
+            ref="trigger"
+            :type="chat ? 'button' : undefined"
+            class="kai-dock-body"
+            :aria-label="chat ? triggerLabel : undefined"
+            :aria-expanded="chat ? chatOpen : undefined"
+            :aria-controls="chat ? chatId : undefined"
+            data-dock-trigger
+            @click="toggleChat"
+        >
             <KaiCharacter
                 ref="kai"
                 :state="shown"
                 :size="px"
                 animate-size
                 playful
+                :tickle="!chat"
+                :badge="notices.length || false"
                 :colors="colors"
                 :mouth="mouth"
                 :ambient="size !== 'mini'"
@@ -225,7 +453,7 @@ defineExpose({ kai, asleep });
                 :pull="pull"
                 @update:state="onState"
             />
-        </div>
+        </component>
         <div class="kai-dock-controls" role="group" aria-label="Tamaño de KAI">
             <button
                 type="button"
@@ -269,7 +497,80 @@ defineExpose({ kai, asleep });
 }
 
 .kai-dock-body {
+    position: relative;
+    display: block;
     pointer-events: auto;
+}
+
+button.kai-dock-body {
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+button.kai-dock-body:focus-visible {
+    outline: 3px solid #5c9dff;
+    outline-offset: 2px;
+}
+
+.kai-dock-chat {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 10px);
+    transform-origin: bottom right;
+    pointer-events: auto;
+}
+
+.kai-chat-enter-active {
+    transition:
+        opacity 0.2s ease-out,
+        transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.kai-chat-leave-active {
+    transition:
+        opacity 0.15s ease-in,
+        transform 0.2s ease-in;
+}
+
+.kai-chat-enter-from,
+.kai-chat-leave-to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.9);
+}
+
+/* Anillo que rodea el elemento que KAI señala. */
+.kai-dock-spot {
+    position: fixed;
+    border-radius: 14px;
+    box-shadow:
+        0 0 0 2px #5c9dff,
+        0 0 0 7px rgba(92, 157, 255, 0.22),
+        0 0 28px 6px rgba(92, 157, 255, 0.35);
+    pointer-events: none;
+    animation:
+        kai-spot-in 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+        kai-spot-pulse 1.4s ease-in-out 0.45s infinite;
+}
+
+@keyframes kai-spot-in {
+    from {
+        opacity: 0;
+        transform: scale(1.3);
+    }
+}
+
+@keyframes kai-spot-pulse {
+    50% {
+        box-shadow:
+            0 0 0 2px #5c9dff,
+            0 0 0 11px rgba(92, 157, 255, 0.12),
+            0 0 34px 8px rgba(92, 157, 255, 0.3);
+    }
 }
 
 .kai-dock-controls {
@@ -341,8 +642,14 @@ defineExpose({ kai, asleep });
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .kai-dock-controls {
+    .kai-dock-controls,
+    .kai-chat-enter-active,
+    .kai-chat-leave-active {
         transition: none;
+    }
+
+    .kai-dock-spot {
+        animation: none;
     }
 }
 </style>

@@ -60,6 +60,10 @@ export const STATE_CATALOG: Record<KaiState, CatalogEntry> = {
         label: 'Tímido',
         description: 'Se encoge, se sonroja y mira de reojo.',
     },
+    notice: {
+        label: 'Aviso',
+        description: 'Tiene algo para ti: mira el globito, lo señala y salta.',
+    },
 };
 
 export const REACTION_CATALOG: Record<KaiReaction, CatalogEntry> = {
@@ -93,7 +97,8 @@ export const REACTION_CATALOG: Record<KaiReaction, CatalogEntry> = {
     },
     dizzy: {
         label: 'Mareado',
-        description: 'Ojos de espiral y estrellas (da vueltas con el cursor).',
+        description:
+            'Se tambalea, el fluido chapotea, da un traspié y se sacude.',
     },
     explore: {
         label: 'Explorar',
@@ -106,6 +111,10 @@ export const REACTION_CATALOG: Record<KaiReaction, CatalogEntry> = {
     boing: {
         label: 'Rebote',
         description: 'Aplastamiento y estiramiento rápido.',
+    },
+    nod: {
+        label: 'Asentir',
+        description: 'Asiente dos veces: «entendido».',
     },
 };
 
@@ -127,6 +136,7 @@ export const STATE_GROUPS: { label: string; states: KaiState[] }[] = [
             'doubt',
             'error',
             'waiting',
+            'notice',
         ],
     },
     { label: 'Emociones', states: ['content', 'music', 'sleeping', 'shy'] },

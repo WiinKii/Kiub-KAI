@@ -51,7 +51,10 @@ import type {
     KaiState,
 } from './types';
 
-export const MAX_SATS = 8;
+/** Satélites: 0-7 para los rigs; 8-10 para agarrar y señalar. */
+export const MAX_SATS = 11;
+const GRAB_SLOTS = [8, 9, 10] as const;
+const POINT_SLOT = 8;
 
 export type EyeFrame = {
     d: string;
@@ -100,14 +103,15 @@ export type KaiFrame = {
     spirals: [GlyphFrame, GlyphFrame];
     hearts: [GlyphFrame, GlyphFrame];
     blush: [Blob, Blob];
+    /** Boca minimalista: un solo trazo blanco, como los ojos. */
     mouth: {
         d: string;
-        tongue: string;
         transform: string;
-        fill: number;
-        line: number;
+        opacity: number;
         width: number;
     };
+    /** Punto arriba a la derecha del cuerpo para el globito de avisos. */
+    badge: Vec;
     sprites: SpriteFrame[];
     face: number;
     cool: number;
@@ -244,6 +248,13 @@ export class KaiEngine {
     private look: KaiGaze | null = null;
     /** Desplazamiento elástico por empujones externos (en radios). */
     private jelly = { x: 0, y: 0, vx: 0, vy: 0 };
+    /** Carga de mareo (0-1) mientras el cursor gira, y su ángulo. */
+    private spinCharge = 0;
+    private spinAngle = 0;
+    /** Punto agarrado (en radios desde el centro) o null. */
+    private grabPoint: KaiGaze | null = null;
+    /** Dirección a la que señala con una manita, o null. */
+    private pointDir: KaiGaze | null = null;
     private intensity = 1;
     private intensityNow = 1;
     private sizeFactor = 1;
@@ -251,6 +262,7 @@ export class KaiEngine {
     private reduced: boolean;
     private ambient = true;
     private cell = 3;
+    private decimals: 1 | 2 = 2;
     private random: () => number;
 
     private sats: Sat[];
@@ -325,12 +337,11 @@ export class KaiEngine {
             blush: [blob(), blob()],
             mouth: {
                 d: '',
-                tongue: '',
                 transform: '',
-                fill: 0,
-                line: 1,
+                opacity: 1,
                 width: 1,
             },
+            badge: { x: 0, y: 0 },
             sprites: Array.from({ length: MAX_SPRITES }, () => ({
                 visible: false,
                 kind: 'dot' as SpriteKind,
@@ -462,6 +473,50 @@ export class KaiEngine {
     }
 
     /**
+     * Carga de mareo mientras el cursor da vueltas (0-1) y ángulo del cursor:
+     * el fluido chapotea hacia él y el cuerpo se tambalea. Se apaga sola.
+     */
+    setSpin(charge: number, angle: number): void {
+        this.spinCharge = this.reduced ? 0 : clamp(charge, 0, 1);
+        this.spinAngle = angle;
+    }
+
+    /**
+     * Agarrar y estirar: `point` en radios desde el centro (null = soltar).
+     * Le sale una mano que sigue al puntero unida por un hilo de fluido; al
+     * soltar, la masa corre hacia allí y vuelve con rebote.
+     */
+    grab(point: KaiGaze | null): void {
+        if (this.reduced || !point) {
+            if (this.grabPoint && !this.reduced) {
+                const { x, y } = this.grabPoint;
+                this.nudge(x * 1.6, y * 1.6);
+                this.blinkStart = this.time + 0.05;
+            }
+
+            this.grabPoint = null;
+
+            return;
+        }
+
+        const d = Math.hypot(point.x, point.y);
+        const k = d > 2.3 ? 2.3 / d : 1;
+        this.grabPoint = { x: point.x * k, y: point.y * k };
+    }
+
+    /** Señala con una manita hacia una dirección (pantalla), o deja de hacerlo. */
+    point(dir: KaiGaze | null): void {
+        if (!dir) {
+            this.pointDir = null;
+
+            return;
+        }
+
+        const d = Math.hypot(dir.x, dir.y) || 1;
+        this.pointDir = { x: dir.x / d, y: dir.y / d };
+    }
+
+    /**
      * Empujón externo (p. ej. el scroll de la página), en radios/s: la masa
      * se desplaza un poco, se deforma por inercia y vuelve con rebote.
      */
@@ -500,6 +555,8 @@ export class KaiEngine {
     /** Resolución del contorno según el tamaño en pantalla (px). */
     setResolution(px: number): void {
         this.cell = clamp(5.6 / Math.max(0.1, px / 144), 2.4, 7.5);
+        // Por debajo de 200 px, una décima de unidad ya es menos de 0,15 px.
+        this.decimals = px < 200 ? 1 : 2;
     }
 
     /** Lóbulos y motas de ambiente (se apagan en tamaño mínimo). */
@@ -585,6 +642,7 @@ export class KaiEngine {
             this.finishReaction();
         }
 
+        this.spinCharge = Math.max(0, this.spinCharge - step * 0.4);
         this.runBehavior(step);
         this.runRig();
         this.computeEffectiveTargets();
@@ -919,18 +977,74 @@ export class KaiEngine {
             ? REACTIONS[this.reaction.name].rig
             : STATES[this.stateName].rig;
 
-        if (!rig) {
-            return;
+        if (rig) {
+            const ctx = this.rigContext;
+            ctx.t =
+                this.time -
+                (this.reaction ? this.reactionStart : this.stateStart);
+            ctx.ambient = this.ambient;
+            ctx.engaged = this.look !== null || this.grabPoint !== null;
+            ctx.gx = this.value.gx;
+            ctx.gy = this.value.gy;
+            rig(ctx);
         }
 
-        const ctx = this.rigContext;
-        ctx.t =
-            this.time - (this.reaction ? this.reactionStart : this.stateStart);
-        ctx.ambient = this.ambient;
-        ctx.engaged = this.look !== null;
-        ctx.gx = this.value.gx;
-        ctx.gy = this.value.gy;
-        rig(ctx);
+        // Las interacciones directas van después: mandan sobre el rig.
+        if (this.grabPoint) {
+            this.applyGrab(this.grabPoint);
+        } else if (this.pointDir) {
+            this.applyPoint(this.pointDir);
+        }
+    }
+
+    private applyGrab(p: KaiGaze): void {
+        const d = Math.hypot(p.x, p.y);
+        const ux = d > 1e-3 ? p.x / d : 0;
+        const uy = d > 1e-3 ? p.y / d : 0;
+        // Cuanto más se estira, más fino el hilo (sobre todo en el medio).
+        const thin = clamp((d - 0.9) / 1.2, 0, 1);
+        const hand: SpringConfig = { w: 24, z: 0.72 };
+        const [a, b, c] = GRAB_SLOTS;
+        this.wantSat(a, p.x * 0.36, p.y * 0.36, 0.27 - 0.08 * thin, hand, 3);
+        this.wantSat(b, p.x * 0.7, p.y * 0.7, 0.2 - 0.09 * thin, hand, 3);
+        this.wantSat(c, p.x, p.y, 0.23 - 0.02 * thin, hand, 3);
+
+        const o = this.overrides;
+        const reach = Math.min(d, 1.4);
+        // Todo el cuerpo cede un poco hacia el tirón.
+        o.x = (o.x ?? this.target.x) + 0.12 * ux * reach;
+        o.y = (o.y ?? this.target.y) + 0.08 * uy * reach;
+        o.lean = (o.lean ?? this.target.lean) + 0.07 * ux * reach;
+        o.bx = (o.bx ?? this.target.bx) + 0.2 * ux * reach;
+        o.by = (o.by ?? this.target.by) + 0.16 * uy * reach;
+        o.gx = ux * 0.85;
+        o.gy = uy * 0.85;
+        o.open = 1.18;
+        o.eyeH = 1.08;
+        o.mOpen = 0.35;
+        o.mSmile = 0.3;
+        o.blush = Math.max(o.blush ?? 0, 0.35);
+        o.wob = 1.8;
+    }
+
+    private applyPoint(dir: KaiGaze): void {
+        const t = this.time;
+        // Señala con un pequeño vaivén, como diciendo «ahí».
+        const tap = 1.24 + 0.06 * Math.sin(t * 7);
+        this.wantSat(
+            POINT_SLOT,
+            dir.x * tap,
+            dir.y * tap,
+            0.17,
+            { w: 14, z: 0.6 },
+            4.5,
+        );
+        const o = this.overrides;
+        o.gx = dir.x * 0.9;
+        o.gy = dir.y * 0.9;
+        o.lean = (o.lean ?? this.target.lean) + dir.x * 0.06;
+        o.bx = (o.bx ?? this.target.bx) + dir.x * 0.08;
+        o.by = (o.by ?? this.target.by) + dir.y * 0.06;
     }
 
     private updateSats(dt: number): void {
@@ -1117,6 +1231,21 @@ export class KaiEngine {
 
         Object.assign(e, this.overrides);
 
+        // Antes de marearse: el fluido chapotea hacia el cursor que gira y el
+        // cuerpo se tambalea cada vez más (así se nota que «algo pasa»).
+        const spin = this.reaction || this.reduced ? 0 : this.spinCharge;
+
+        if (spin > 0.01) {
+            const a = this.spinAngle;
+            e.bx += 0.18 * spin * Math.cos(a);
+            e.by += 0.12 * spin * Math.sin(a);
+            e.rot += 0.2 * spin * Math.sin(a);
+            e.lean += 0.08 * spin * Math.cos(a);
+            e.wob += 1.6 * spin;
+            e.eyeH -= 0.16 * spin;
+            e.mWave = Math.max(e.mWave, spin * 0.6);
+        }
+
         // Estirado (final del scroll): mira hacia arriba y abre la boca.
         const pull = Math.max(0, this.value.pull);
 
@@ -1163,7 +1292,8 @@ export class KaiEngine {
     /* ── Composición del fotograma ──────────────────────────────────── */
 
     private out(ch: Channel): number {
-        const v = this.value[ch];
+        // Extrapola el resto del paso fijo: sin tirones a 90/120/144 Hz.
+        const v = this.value[ch] + this.velocity[ch] * this.acc;
 
         if (!AMPLITUDE_CHANNELS.has(ch) && !this.reduced) {
             return v;
@@ -1193,9 +1323,13 @@ export class KaiEngine {
         out.x =
             this.out('x') * R +
             drift * 0.045 * R * Math.sin(this.time * 0.23 * TAU * 0.5);
+        // Dos armónicos no múltiplos: la flotación no se siente mecánica.
+        const phase = this.floatPhase * TAU;
         out.y =
             this.out('y') * R -
-            float * 0.05 * R * Math.sin(this.floatPhase * TAU) +
+            float *
+                R *
+                (0.05 * Math.sin(phase) + 0.012 * Math.sin(phase * 2 + 1.1)) +
             drift * 0.02 * R * Math.sin(this.time * 0.37);
         out.x += this.jelly.x * R * amp;
         out.y += this.jelly.y * R * amp;
@@ -1220,7 +1354,11 @@ export class KaiEngine {
         const lagX = clamp(-velX * 0.05, -0.14, 0.14) * amp;
         const lagY = clamp(-velY * 0.05, -0.14, 0.14) * amp;
 
-        const sx = this.out('sx') + breath + pulse * 0.03;
+        // Al subir se estira un poco y al bajar se ensancha (acción secundaria).
+        const rise = this.reduced
+            ? 0
+            : 0.012 * this.out('float') * amp * Math.cos(this.floatPhase * TAU);
+        const sx = this.out('sx') + breath + pulse * 0.03 - rise;
 
         const shape: BodyShape = {
             x: c.x / R,
@@ -1321,13 +1459,17 @@ export class KaiEngine {
                 clamp(maxX + pad, -260, 260),
                 clamp(maxY + pad, -260, 260),
             ],
-            { cell: this.cell },
+            { cell: this.cell, anchor: origin, decimals: this.decimals },
         ).path;
 
         f.cx = n2(origin.x);
         f.cy = n2(origin.y);
 
         this.composeMaterial(origin, sx);
+        // El globito va sobre el «hombro» derecho y viaja con la gelatina.
+        t.apply(0.74, -0.74, f.badge);
+        f.badge.x = n2(f.badge.x);
+        f.badge.y = n2(f.badge.y);
         this.composeShadow(origin, maxY, sx);
         this.composeFace(lagX, lagY);
         this.composeSprites(origin);
@@ -1500,7 +1642,6 @@ export class KaiEngine {
             cat: v.mCat,
         });
         f.mouth.d = mouth.d;
-        f.mouth.tongue = mouth.tongue;
         f.mouth.transform = matrix(
             a * fore,
             b * fore,
@@ -1509,8 +1650,7 @@ export class KaiEngine {
             mouthCenter.x,
             mouthCenter.y,
         );
-        f.mouth.fill = n2(clamp(v.mOpen * 5, 0, 1) * face);
-        f.mouth.line = n2(clamp(1 - v.mOpen * 4, 0, 1) * face);
+        f.mouth.opacity = n2(face);
         f.mouth.width = n2(mouth.stroke);
     }
 

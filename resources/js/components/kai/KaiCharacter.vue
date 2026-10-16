@@ -54,8 +54,18 @@ type Props = {
     ambient?: boolean;
     /** Mirar al puntero mientras está sobre el propio componente. */
     followPointer?: boolean;
-    /** Juegos: se marea si das vueltas con el cursor y ríe si lo pulsas. */
+    /**
+     * Juegos: se marea si das vueltas con el cursor, se estira si lo
+     * arrastras y ríe si lo pulsas (ver `tickle`).
+     */
     playful?: boolean;
+    /** Con `playful`, pulsarlo le hace cosquillas. */
+    tickle?: boolean;
+    /**
+     * Globito de avisos arriba a la derecha, sobre el cuerpo: un número
+     * (9+ a partir de 10), un texto corto o `true` para un punto.
+     */
+    badge?: number | string | boolean;
     /** Estiramiento hacia arriba (0-1), p. ej. al final del scroll. */
     pull?: number;
     /** Anima los cambios de tamaño. */
@@ -79,6 +89,8 @@ const props = withDefaults(defineProps<Props>(), {
     ambient: true,
     followPointer: false,
     playful: false,
+    tickle: true,
+    badge: false,
     pull: 0,
     animateSize: false,
     label: '',
@@ -103,6 +115,23 @@ const palette = computed(() =>
     paletteVars({ ...KAI_DEFAULT_COLORS, ...props.colors }),
 );
 
+const showBadge = computed(
+    () =>
+        props.badge !== false &&
+        props.badge !== 0 &&
+        props.badge !== '' &&
+        props.badge != null,
+);
+const badgeText = computed(() => {
+    const b = props.badge;
+
+    if (typeof b === 'number') {
+        return b > 9 ? '9+' : String(b);
+    }
+
+    return typeof b === 'string' ? b : '';
+});
+
 const uid = useId().replace(/[^\w-]/g, '');
 const ids = {
     shape: `kai-${uid}-shape`,
@@ -117,8 +146,6 @@ const ids = {
     soft: `kai-${uid}-soft`,
     halo: `kai-${uid}-halo`,
     blush: `kai-${uid}-blush`,
-    mouth: `kai-${uid}-mouth`,
-    mouthClip: `kai-${uid}-mouth-clip`,
 };
 const url = (id: string) => `url(#${id})`;
 const shapeHref = `#${ids.shape}`;
@@ -143,9 +170,7 @@ const coolEl = ref<SVGUseElement | null>(null);
 const glowEl = ref<SVGUseElement | null>(null);
 const highlightEl = ref<SVGEllipseElement | null>(null);
 const mouthEl = ref<SVGPathElement | null>(null);
-const mouthLineEl = ref<SVGPathElement | null>(null);
-const tongueEl = ref<SVGPathElement | null>(null);
-const mouthGroupEl = ref<SVGGElement | null>(null);
+const badgeEl = ref<HTMLElement | null>(null);
 const faceEl = ref<SVGGElement | null>(null);
 
 type Slots = (Element | null)[];
@@ -202,6 +227,8 @@ function ellipse(
     attr(el, 'rx', e.rx);
     attr(el, 'ry', e.ry);
 }
+
+let badgeTransform = '';
 
 function render() {
     const f = engine.frame;
@@ -278,13 +305,22 @@ function render() {
     if (props.mouth) {
         const m = f.mouth;
         attr(mouthEl.value, 'd', m.d);
-        attr(mouthLineEl.value, 'd', m.d);
-        attr(tongueEl.value, 'd', m.tongue);
-        attr(mouthGroupEl.value, 'transform', m.transform);
-        attr(mouthEl.value, 'opacity', m.fill);
-        attr(tongueEl.value, 'opacity', m.fill);
-        attr(mouthLineEl.value, 'opacity', m.line);
-        attr(mouthLineEl.value, 'stroke-width', m.width);
+        attr(mouthEl.value, 'transform', m.transform);
+        attr(mouthEl.value, 'opacity', m.opacity);
+        attr(mouthEl.value, 'stroke-width', m.width);
+    }
+
+    if (badgeEl.value) {
+        // Del viewBox (-72…72, -80…64) a píxeles de la caja.
+        const k = px.value / 144;
+        const x = Math.round((f.badge.x + 72) * k * 10) / 10;
+        const y = Math.round((f.badge.y + 80) * k * 10) / 10;
+        const transform = `translate(${x}px, ${y}px)`;
+
+        if (badgeTransform !== transform) {
+            badgeTransform = transform;
+            badgeEl.value.style.transform = transform;
+        }
     }
 
     f.sprites.forEach((s, i) => {
@@ -422,6 +458,13 @@ watch(
         requestAnimationFrame(() => render());
     },
 );
+watch(showBadge, (visible) => {
+    if (visible) {
+        // Colocarlo ya, aunque el bucle esté en reposo (movimiento reducido).
+        badgeTransform = '';
+        requestAnimationFrame(() => render());
+    }
+});
 
 // Gesto en curso, también como atributo (`data-kai-reaction`) para estilos y pruebas.
 const reaction = ref<KaiReaction | null>(null);
@@ -489,6 +532,29 @@ function releaseGaze() {
 }
 
 function onPointerMove(event: PointerEvent) {
+    if (press && event.pointerId === press.id) {
+        const moved = Math.hypot(
+            event.clientX - press.x,
+            event.clientY - press.y,
+        );
+
+        if (!dragging.value && moved > 6) {
+            dragging.value = true;
+            root.value?.setPointerCapture?.(event.pointerId);
+        }
+
+        if (dragging.value) {
+            const offset = grabOffset(event);
+
+            if (offset) {
+                engine.grab(offset);
+                wake();
+            }
+
+            return;
+        }
+    }
+
     if (!props.followPointer || event.pointerType === 'touch') {
         return;
     }
@@ -500,6 +566,10 @@ function onPointerMove(event: PointerEvent) {
 
 // En pantallas táctiles mira el punto tocado un momento y vuelve.
 function onPointerDown(event: PointerEvent) {
+    if (props.playful && !reduced.value && event.button === 0) {
+        press = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    }
+
     if (!props.followPointer || event.pointerType !== 'touch') {
         return;
     }
@@ -527,6 +597,9 @@ let lastAngle: number | null = null;
 let lastMove = 0;
 let dizzyUntil = 0;
 
+/** Vueltas netas (con olvido lento) que hacen falta para marearlo. */
+const DIZZY_TURNS = 4;
+
 // Solo escucha al puntero con los juegos activos y mientras KAI se ve; el
 // cálculo se limita a una zona alrededor de KAI.
 useEventListener(
@@ -535,13 +608,13 @@ useEventListener(
     (event: PointerEvent) => {
         const c = bodyCenter();
 
-        if (!c || event.pointerType === 'touch') {
+        if (!c || event.pointerType === 'touch' || dragging.value) {
             return;
         }
 
         const now = performance.now();
         // El giro acumulado se olvida despacio: hay que dar vueltas con ganas.
-        spin *= Math.exp(-((now - lastMove) / 1000) * 0.22);
+        spin *= Math.exp(-((now - lastMove) / 1000) * 0.15);
         lastMove = now;
 
         const dx = event.clientX - c.cx;
@@ -585,18 +658,72 @@ useEventListener(
 
         lastAngle = angle;
 
-        // Unas vueltas seguidas (2,5 netas): se marea.
-        if (Math.abs(spin) > TAU * 2.5 && now > dizzyUntil) {
+        // Desde la primera vuelta se nota: el fluido chapotea hacia el
+        // cursor y se tambalea cada vez más, hasta que se marea.
+        const charge = Math.min(
+            1,
+            Math.max(0, (Math.abs(spin) - TAU) / (TAU * (DIZZY_TURNS - 1))),
+        );
+        engine.setSpin(now > dizzyUntil ? charge : 0, angle);
+        wake();
+
+        if (Math.abs(spin) > TAU * DIZZY_TURNS && now > dizzyUntil) {
             spin = 0;
-            dizzyUntil = now + 5000;
+            dizzyUntil = now + 6000;
+            engine.setSpin(0, angle);
             void react('dizzy');
         }
     },
     { passive: true },
 );
 
-function onClick() {
-    if (props.playful && engine.activeReaction !== 'dizzy') {
+/* ── Agarrar y estirar ───────────────────────────────────────────────── */
+let press: { x: number; y: number; id: number } | null = null;
+const dragging = ref(false);
+let suppressClick = false;
+
+function grabOffset(event: PointerEvent): KaiGaze | null {
+    const c = bodyCenter();
+
+    if (!c) {
+        return null;
+    }
+
+    const radius = (c.rect.width * R) / 144;
+
+    return {
+        x: (event.clientX - c.cx) / radius,
+        y: (event.clientY - c.cy) / radius,
+    };
+}
+
+function endPress(event: PointerEvent) {
+    if (!press || event.pointerId !== press.id) {
+        return;
+    }
+
+    if (dragging.value) {
+        engine.grab(null);
+        wake();
+        // El clic que sigue a un arrastre no cuenta (ni cosquillas ni abrir).
+        suppressClick = true;
+        window.setTimeout(() => (suppressClick = false), 0);
+    }
+
+    press = null;
+    dragging.value = false;
+}
+
+function onClick(event: MouseEvent) {
+    if (suppressClick) {
+        suppressClick = false;
+        event.stopPropagation();
+        event.preventDefault();
+
+        return;
+    }
+
+    if (props.playful && props.tickle && engine.activeReaction !== 'dizzy') {
         void react('giggle');
     }
 }
@@ -671,6 +798,12 @@ function blink() {
     wake();
 }
 
+/** Señala con una manita hacia una dirección (pantalla), o deja de hacerlo. */
+function point(dir: KaiGaze | null) {
+    engine.point(dir);
+    wake();
+}
+
 /** Empujón elástico externo, en radios/s (p. ej. el scroll de la página). */
 function nudge(vx: number, vy: number) {
     engine.nudge(vx, vy);
@@ -702,6 +835,7 @@ defineExpose({
     lookAt,
     blink,
     nudge,
+    point,
     pause,
     resume,
     inspect,
@@ -723,21 +857,32 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div
+    <span
         ref="root"
         class="kai"
-        :class="{ 'kai--animate-size': animateSize, 'kai--playful': playful }"
+        :class="{
+            'kai--animate-size': animateSize,
+            'kai--playful': playful,
+            'kai--dragging': dragging,
+        }"
         :data-surface="surface"
         :data-kai-state="state"
         :data-kai-reaction="reaction || undefined"
         :data-small="px < 64 || undefined"
-        :style="{ width: `${px}px`, height: `${px}px`, ...palette }"
+        :style="{
+            width: `${px}px`,
+            height: `${px}px`,
+            '--kai-badge-size': `${Math.max(16, Math.round(px * 0.17))}px`,
+            ...palette,
+        }"
         :role="label ? 'img' : undefined"
         :aria-label="label || undefined"
         :aria-hidden="label ? undefined : 'true'"
         @pointermove="onPointerMove"
         @pointerleave="releaseGaze"
         @pointerdown="onPointerDown"
+        @pointerup="endPress"
+        @pointercancel="endPress"
         @click="onClick"
     >
         <svg
@@ -855,9 +1000,6 @@ onBeforeUnmount(() => {
                 >
                     <feGaussianBlur stdDeviation="2.4" />
                 </filter>
-                <clipPath :id="ids.mouthClip">
-                    <use :href="`#${ids.mouth}`" />
-                </clipPath>
             </defs>
 
             <ellipse
@@ -987,15 +1129,7 @@ onBeforeUnmount(() => {
                     :d="HEART"
                     opacity="0"
                 />
-                <g v-if="mouth" ref="mouthGroupEl">
-                    <path :id="ids.mouth" ref="mouthEl" class="kai-mouth" />
-                    <path
-                        ref="tongueEl"
-                        class="kai-tongue"
-                        :clip-path="url(ids.mouthClip)"
-                    />
-                    <path ref="mouthLineEl" class="kai-mouth-line" />
-                </g>
+                <path v-if="mouth" ref="mouthEl" class="kai-mouth" />
             </g>
 
             <!-- Partículas: notas, corazones, zetas, destellos -->
@@ -1014,7 +1148,15 @@ onBeforeUnmount(() => {
                 <line x1="-72" :y1="R + 16" x2="72" :y2="R + 16" />
             </g>
         </svg>
-    </div>
+        <span
+            v-if="showBadge"
+            ref="badgeEl"
+            class="kai-badge"
+            aria-hidden="true"
+        >
+            <span class="kai-badge-dot">{{ badgeText }}</span>
+        </span>
+    </span>
 </template>
 
 <style scoped>
@@ -1037,6 +1179,12 @@ onBeforeUnmount(() => {
 
 .kai--playful {
     cursor: pointer;
+    /* Arrastrar lo estira: el gesto no debe desplazar la página. */
+    touch-action: none;
+}
+
+.kai--dragging {
+    cursor: grabbing;
 }
 
 .kai[data-surface='dark'],
@@ -1211,19 +1359,91 @@ onBeforeUnmount(() => {
     fill: #ffffff;
 }
 
+/* Un solo trazo blanco, del mismo estilo que los ojos. */
 .kai-mouth {
-    fill: var(--kai-ink);
-}
-
-.kai-tongue {
-    fill: var(--kai-blush);
-}
-
-.kai-mouth-line {
     fill: none;
     stroke: #ffffff;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* Globito de avisos: viaja con el cuerpo (transform por fotograma). */
+.kai-badge {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.kai-badge-dot {
+    display: grid;
+    place-items: center;
+    min-width: var(--kai-badge-size);
+    height: var(--kai-badge-size);
+    padding: 0 calc(var(--kai-badge-size) * 0.28);
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+    background: var(--kai-badge);
+    box-shadow: 0 4px 10px -4px var(--kai-badge);
+    color: #ffffff;
+    font:
+        800 calc(var(--kai-badge-size) * 0.6) / 1 Raleway,
+        system-ui,
+        sans-serif;
+    font-variant-numeric: tabular-nums;
+    transform: translate(-50%, -50%);
+    animation: kai-badge-pop 0.55s cubic-bezier(0.34, 1.7, 0.64, 1) both;
+}
+
+.kai-badge-dot:empty {
+    min-width: calc(var(--kai-badge-size) * 0.62);
+    height: calc(var(--kai-badge-size) * 0.62);
+    padding: 0;
+}
+
+/* Onda suave que invita a mirar, sin parpadeos bruscos. */
+.kai-badge-dot::after {
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    box-shadow: 0 0 0 0 var(--kai-badge);
+    content: '';
+    animation: kai-badge-ping 2.6s ease-out 0.6s infinite;
+}
+
+.kai[data-surface='dark'] .kai-badge-dot,
+:root.dark .kai[data-surface='auto'] .kai-badge-dot {
+    border-color: var(--kai-ink);
+}
+
+@keyframes kai-badge-pop {
+    from {
+        transform: translate(-50%, -50%) scale(0);
+    }
+
+    to {
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+@keyframes kai-badge-ping {
+    0% {
+        box-shadow: 0 0 0 0 var(--kai-badge);
+        opacity: 0.55;
+    }
+
+    70%,
+    100% {
+        box-shadow: 0 0 0 calc(var(--kai-badge-size) * 0.45) var(--kai-badge);
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .kai-badge-dot,
+    .kai-badge-dot::after {
+        animation: none;
+    }
 }
 
 .kai-sprite[data-kind='fill'] {

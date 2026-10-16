@@ -30,6 +30,13 @@ export type FieldOptions = {
      * fusión se parece más a la tensión superficial de una gota.
      */
     falloff?: number;
+    /**
+     * Origen de la rejilla. Anclada al cuerpo, la rejilla viaja con él: al
+     * flotar, el contorno no «hierve» por cambiar de celdas.
+     */
+    anchor?: { x: number; y: number };
+    /** Decimales del trazado: 1 basta en tamaños pequeños (cadena más corta). */
+    decimals?: 1 | 2;
 };
 
 export type FieldResult = {
@@ -135,6 +142,33 @@ function r2(v: number): string {
     return (Math.round(v * 100) / 100).toString();
 }
 
+function r1(v: number): string {
+    return (Math.round(v * 10) / 10).toString();
+}
+
+/** Suavizado laplaciano [1 2 1]/4 de un bucle cerrado, en su sitio. */
+function relax(xs: number[], ys: number[], passes: number): void {
+    const n = xs.length;
+
+    for (let p = 0; p < passes; p++) {
+        let prevX = xs[n - 1];
+        let prevY = ys[n - 1];
+        const firstX = xs[0];
+        const firstY = ys[0];
+
+        for (let i = 0; i < n; i++) {
+            const nextX = i + 1 < n ? xs[i + 1] : firstX;
+            const nextY = i + 1 < n ? ys[i + 1] : firstY;
+            const x = xs[i];
+            const y = ys[i];
+            xs[i] = (prevX + 2 * x + nextX) / 4;
+            ys[i] = (prevY + 2 * y + nextY) / 4;
+            prevX = x;
+            prevY = y;
+        }
+    }
+}
+
 /** q^(k/2) sin `Math.pow` para los exponentes habituales (va por celda). */
 function falloffPow(q: number, k: number): number {
     switch (k) {
@@ -161,13 +195,17 @@ export function traceField(
     body: BodyField,
     balls: Ball[],
     bounds: [number, number, number, number],
-    { cell, falloff = 3 }: FieldOptions,
+    { cell, falloff = 3, anchor = { x: 0, y: 0 }, decimals = 2 }: FieldOptions,
 ): FieldResult {
-    const [bx0, by0, bx1, by1] = bounds;
-    const nx = Math.max(4, Math.ceil((bx1 - bx0) / cell));
-    const ny = Math.max(4, Math.ceil((by1 - by0) / cell));
-    const hx = (bx1 - bx0) / nx;
-    const hy = (by1 - by0) / ny;
+    const fmt = decimals === 1 ? r1 : r2;
+    // Celdas de tamaño fijo alineadas con el ancla (no con la caja, que
+    // cambia en cada respiración).
+    const bx0 = anchor.x + Math.floor((bounds[0] - anchor.x) / cell) * cell;
+    const by0 = anchor.y + Math.floor((bounds[1] - anchor.y) / cell) * cell;
+    const nx = Math.max(4, Math.ceil((bounds[2] - bx0) / cell));
+    const ny = Math.max(4, Math.ceil((bounds[3] - by0) / cell));
+    const hx = cell;
+    const hy = cell;
     const stride = nx + 1;
     const hCount = (ny + 1) * nx;
     const edges = hCount + ny * (nx + 1);
@@ -371,16 +409,19 @@ export function traceField(
 
         area += Math.abs(a / 2);
 
-        // Diezma bucles largos y dibuja una B-spline cuadrática (curvas
-        // entre puntos medios): el borde queda continuo y sin esquinas.
-        const step = n > 120 ? 3 : n > 48 ? 2 : 1;
+        // Suaviza primero (no depende de qué punto inicia el bucle) y solo
+        // después aligera: como los puntos ya están sobre una curva suave,
+        // quedarse con uno de cada dos no hace temblar el borde. Al final,
+        // B-spline cuadrática (curvas entre puntos medios), sin esquinas.
+        relax(loopX, loopY, 2);
+        const step = n > 48 ? 2 : 1;
         const m = Math.floor(n / step);
         const px = (i: number): number => loopX[(i % m) * step];
         const py = (i: number): number => loopY[(i % m) * step];
-        path += `M${r2((px(m - 1) + px(0)) / 2)} ${r2((py(m - 1) + py(0)) / 2)}`;
+        path += `M${fmt((px(m - 1) + px(0)) / 2)} ${fmt((py(m - 1) + py(0)) / 2)}`;
 
         for (let i = 0; i < m; i++) {
-            path += `Q${r2(px(i))} ${r2(py(i))} ${r2((px(i) + px(i + 1)) / 2)} ${r2((py(i) + py(i + 1)) / 2)}`;
+            path += `Q${fmt(px(i))} ${fmt(py(i))} ${fmt((px(i) + px(i + 1)) / 2)} ${fmt((py(i) + py(i + 1)) / 2)}`;
         }
 
         path += 'Z';

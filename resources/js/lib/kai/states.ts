@@ -440,6 +440,39 @@ const shyRig: Rig = (c) => {
     c.set('gy', peek ? 0.05 : 0.38);
 };
 
+/**
+ * Aviso: mira el globito de arriba a la derecha, alza una manita a su lado y
+ * después te mira a ti («tienes algo»), con un saltito de vez en cuando.
+ */
+const noticeRig: Rig = (c) => {
+    const p = c.t % 4.2;
+    const raise = smooth(0.2, 0.55, p) - smooth(2.2, 2.7, p);
+
+    if (raise > 0.02) {
+        c.sat(
+            0,
+            -0.3 + 0.07 * Math.sin(c.t * 9) * raise,
+            0.95 + 0.28 * raise,
+            0.13 + 0.04 * raise,
+            limb,
+            4.5,
+        );
+    }
+
+    // Si alguien le mira, le atiende a él.
+    if (!c.engaged) {
+        const atBadge = p < 2.4;
+        c.set('gx', atBadge ? 0.6 : 0.05);
+        c.set('gy', atBadge ? -0.62 : 0.1);
+    }
+
+    if (p > 2.75 && p < 3.25) {
+        const hop = Math.sin(((p - 2.75) / 0.5) * PI);
+        c.set('y', -0.1 * hop);
+        c.set('sx', 1 - 0.06 * hop);
+    }
+};
+
 /* ── Estados ───────────────────────────────────────────────────────── */
 
 export const STATES: Record<KaiState, StateDef> = {
@@ -862,6 +895,36 @@ export const STATES: Record<KaiState, StateDef> = {
         },
         rig: shyRig,
     },
+
+    notice: {
+        pose: {
+            ...OPEN,
+            gx: 0.6,
+            gy: -0.62,
+            open: 1.06,
+            eyeH: 1.04,
+            lean: 0.03,
+            blush: 0.2,
+            mSmile: 0.5,
+        },
+        enter: [
+            { at: 0, set: { gx: 0.6, gy: -0.62, open: 1.12 }, spring: quick },
+            {
+                at: 0.05,
+                set: { y: -0.12, sx: 0.92 },
+                spring: { w: 16, z: 0.5 },
+            },
+            { at: 0.28, set: { y: 0, sx: 1 }, spring: { w: 11, z: 0.4 } },
+        ],
+        behavior: {
+            breath: 3.6,
+            blink: [2.4, 5],
+            saccade: null,
+            lookWeight: 0.4,
+            bodyFollow: 0.08,
+        },
+        rig: noticeRig,
+    },
 };
 
 /* ── Rigs de reacciones ────────────────────────────────────────────── */
@@ -1025,32 +1088,84 @@ const ideaRig: Rig = (c) => {
 /** Mareo: gira en círculos con ojos de espiral y estrellas encima. */
 const dizzyRig: Rig = (c) => {
     const t = c.t;
-    const k = 1 - smooth(2.4, 3.0, t);
-    const w = TAU / 0.95;
-    c.set('x', 0.13 * Math.cos(t * w) * k);
-    c.set('y', 0.07 * Math.sin(t * w) * k);
-    c.set('rot', 0.16 * Math.sin(t * w + 0.8) * k);
-    c.set('lean', 0.08 * Math.cos(t * w) * k);
+    const w = TAU / 1.05;
+    // Tambaleo: crece, se mantiene y se apaga antes del traspié.
+    const env = smooth(0.2, 0.6, t) * (1 - smooth(2.35, 2.75, t));
 
-    if (t > 2.45 && t < 3.05) {
-        // Sacude la cabeza para despejarse.
-        c.set(
-            'x',
-            0.07 * Math.sin((t - 2.45) * TAU * 6) * (1 - smooth(2.45, 3.05, t)),
+    if (env > 0.001) {
+        // Ocho de borracho, con la parte de arriba retrasada (pesa).
+        c.set('x', 0.2 * env * Math.sin(t * w));
+        c.set('y', 0.06 * env * Math.sin(t * w * 2));
+        c.set('rot', 0.3 * env * Math.sin(t * w + 0.9));
+        c.set('lean', 0.14 * env * Math.sin(t * w + 1.6));
+        c.set('sx', 1 + 0.1 * env * Math.sin(t * w * 2 + 0.5));
+        c.set('gx', 0.55 * Math.sin(t * w * 0.7));
+        c.set('gy', 0.2 * Math.cos(t * w));
+
+        // El fluido chapotea: dos lóbulos dan vueltas alrededor del cuerpo.
+        const slosh = -t * w * 1.25;
+        c.sat(
+            0,
+            slosh + PI,
+            0.93 + 0.08 * Math.sin(t * 5),
+            0.24 * env,
+            limb,
+            3.5,
         );
+        c.sat(1, slosh + 0.4, 0.95, 0.13 * env, limb, 4);
     }
 
-    if (c.once(0, 0.12)) {
+    // Traspié: se le van los pies, se aplasta como un charco y se ladea.
+    const plop = smooth(2.5, 2.8, t) - smooth(3.1, 3.45, t);
+
+    if (plop > 0.001) {
+        c.set('y', 0.12 * plop);
+        c.set('flat', 0.75 * plop);
+        c.set('sx', 1 + 0.16 * plop);
+        c.set('rot', -0.16 * plop);
+    }
+
+    // Se sacude para despejarse…
+    if (t > 3.15 && t < 3.85) {
+        const k = 1 - smooth(3.15, 3.85, t);
+        c.set('rot', 0.15 * k * Math.sin((t - 3.15) * TAU * 7));
+        c.set('wob', 1 + 2 * k);
+    }
+
+    // …y da un saltito de alivio.
+    if (t > 3.8 && t < 4.25) {
+        const hop = Math.sin(((t - 3.8) / 0.45) * PI);
+        c.set('y', -0.09 * hop);
+        c.set('sx', 1 - 0.06 * hop);
+    }
+
+    if (c.once(0, 0.15)) {
         for (let i = 0; i < 3; i++) {
             c.emit('star', {
                 x: 0,
                 y: -1.15,
-                orbit: 0.42,
-                orbitW: 3.2,
+                orbit: 0.45,
+                orbitW: 3.4,
                 orbitPhase: (i / 3) * TAU,
-                size: 0.07,
-                life: 2.5,
+                size: 0.075,
+                life: 2.6,
                 tint: i === 1 ? 1 : 3,
+            });
+        }
+    }
+
+    // Al aplastarse salpica un par de gotitas.
+    if (c.once(1, 2.72)) {
+        for (const side of [-1, 1]) {
+            c.emit('dot', {
+                x: side * 0.9,
+                y: 0.55,
+                vx: side * 0.9,
+                vy: -0.7,
+                ay: 2,
+                size: 0.04,
+                life: 0.7,
+                tint: 3,
             });
         }
     }
@@ -1354,23 +1469,37 @@ export const REACTIONS: Record<KaiReaction, ReactionDef> = {
     },
 
     dizzy: {
-        duration: 3.4,
+        duration: 4.3,
         cues: [
             {
                 at: 0,
                 set: {
                     spiral: 1,
-                    wob: 2.2,
+                    wob: 2.6,
+                    boil: 0.45,
                     mWave: 1,
-                    mOpen: 0.15,
+                    mOpen: 0.12,
                     mSmile: -0.1,
                     mWide: 0.8,
                 },
                 spring: { spiral: { w: 10, z: 0.6 } },
             },
             {
-                at: 2.55,
-                set: { spiral: 0, wob: 1, mWave: 0, mOpen: 0, mSmile: 0.3 },
+                at: 3.15,
+                set: {
+                    ...CLOSED,
+                    spiral: 0,
+                    boil: 0,
+                    mWave: 0,
+                    mOpen: 0,
+                    mSmile: 0.1,
+                },
+                spring: { spiral: { w: 14, z: 0.7 } },
+            },
+            {
+                at: 3.8,
+                set: { ...OPEN, wob: 1, mSmile: 0.45 },
+                spring: { w: 18, z: 0.55 },
                 blink: true,
             },
         ],
@@ -1459,6 +1588,37 @@ export const REACTIONS: Record<KaiReaction, ReactionDef> = {
         ],
         reduced: [],
         reducedDuration: 0.3,
+    },
+
+    nod: {
+        duration: 0.95,
+        cues: [
+            {
+                at: 0,
+                set: { y: 0.06, gy: 0.45, sx: 1.04, eyeH: 0.86, mSmile: 0.6 },
+                spring: { w: 18, z: 0.6 },
+            },
+            {
+                at: 0.17,
+                set: { y: -0.01, gy: 0.05, sx: 1 },
+                spring: { w: 16, z: 0.6 },
+            },
+            {
+                at: 0.35,
+                set: { y: 0.05, gy: 0.4, sx: 1.03 },
+                spring: { w: 18, z: 0.6 },
+            },
+            {
+                at: 0.53,
+                set: { y: 0, gy: 0, sx: 1, eyeH: 1 },
+                spring: { w: 12, z: 0.55 },
+            },
+        ],
+        reduced: [
+            { at: 0, set: { gy: 0.4 } },
+            { at: 0.3, set: { gy: 0 } },
+        ],
+        reducedDuration: 0.6,
     },
 };
 
