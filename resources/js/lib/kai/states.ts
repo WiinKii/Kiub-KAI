@@ -61,6 +61,10 @@ export type RigContext = {
     /** `true` la primera vez que `t` alcanza `at`. */
     once: (id: number, at: number) => boolean;
     rand: () => number;
+    /** Alguien dirige su mirada (puntero o `lookAt`): sin gestos espontáneos. */
+    engaged: boolean;
+    /** Memoria propia de la instancia; se vacía al cambiar de estado o gesto. */
+    mem: Record<string, number>;
 };
 
 export type Rig = (c: RigContext) => void;
@@ -179,6 +183,8 @@ const idleRig: Rig = (c) => {
         );
     }
 
+    idleFidget(c);
+
     c.sat(6, t * 0.32 + 2.6, 1.48 + 0.08 * Math.sin(t * 0.7), 0.05, floaty);
     c.sat(
         7,
@@ -188,6 +194,97 @@ const idleRig: Rig = (c) => {
         floaty,
     );
 };
+
+/**
+ * De vez en cuando, en reposo, un gesto breve y distinto (mirar alrededor,
+ * sacudirse como un cachorro mojado, tararear): así el reposo largo, el de la
+ * intranet, no se vuelve un bucle.
+ */
+const FIDGET_LENGTH = [2.3, 1.2, 2.6];
+
+function idleFidget(c: RigContext): void {
+    const m = c.mem;
+    m.next ??= 10 + c.rand() * 8;
+
+    if (m.start === undefined) {
+        if (c.t < m.next) {
+            return;
+        }
+
+        m.start = c.t;
+        m.fired = 0;
+        // Nunca dos veces seguidas el mismo.
+        m.kind = ((m.kind ?? -1) + 1 + Math.floor(c.rand() * 2)) % 3;
+    }
+
+    const u = c.t - m.start;
+
+    // Si alguien le está mirando, no aparta la vista para mirar alrededor.
+    if (u > FIDGET_LENGTH[m.kind] || (m.kind === 0 && c.engaged)) {
+        delete m.start;
+        m.next = c.t + 18 + c.rand() * 12;
+
+        return;
+    }
+
+    if (m.kind === 0) {
+        // Mira a un lado, luego al otro: los ojos primero, el cuerpo después.
+        if (u > 0.15 && u < 2.05) {
+            c.set('gx', u < 1.05 ? -0.75 : 0.75);
+            c.set('gy', 0.08);
+        }
+    } else if (m.kind === 1) {
+        // Sacudida: giro rápido que se apaga y ojitos felices.
+        const env = smooth(0, 0.12, u) * (1 - smooth(0.6, 1.1, u));
+        c.set('rot', 0.13 * env * Math.sin(u * TAU * 5.5));
+        c.set('wob', 1 + 1.6 * env);
+        c.set('closeL', 1);
+        c.set('closeR', 1);
+        c.set('bendL', 1);
+        c.set('bendR', 1);
+
+        if (u > 0.35 && !m.fired) {
+            m.fired = 1;
+
+            for (const side of [-1, 1]) {
+                c.emit('dot', {
+                    x: side * 0.95,
+                    y: -0.1,
+                    vx: side * (0.8 + 0.3 * c.rand()),
+                    vy: -0.55,
+                    ay: 1.6,
+                    size: 0.035,
+                    life: 0.7,
+                    tint: 3,
+                });
+            }
+        }
+    } else {
+        // Tararea: ojos «◡», se mece y suelta una nota.
+        const env = smooth(0, 0.3, u) * (1 - smooth(2.1, 2.6, u));
+        c.set('rot', 0.06 * env * Math.sin((u / 1.3) * TAU));
+        c.set('closeL', env);
+        c.set('closeR', env);
+        c.set('bendL', -1);
+        c.set('bendR', -1);
+        c.set('blush', 0.45 * env);
+        c.set('mSmile', 0.35 + 0.5 * env);
+
+        if (u > 0.5 && !m.fired) {
+            m.fired = 1;
+            c.emit('note', {
+                x: 0.75,
+                y: -0.35,
+                vx: 0.25,
+                vy: -0.35,
+                size: 0.16,
+                life: 1.8,
+                sway: 0.2,
+                tint: 1,
+            });
+        }
+    }
+}
 
 /** Curioso: un lóbulo se asoma hacia donde mira. */
 const curiousRig: Rig = (c) => {

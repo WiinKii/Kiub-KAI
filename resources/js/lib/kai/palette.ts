@@ -116,8 +116,12 @@ export function paletteVars(colors: KaiColors): Record<string, string> {
         '--kai-mid': mix(primary, '#ffffff', 0.22),
         '--kai-light': mix(primary, '#ffffff', 0.6),
         '--kai-accent-light': mix(accent, '#ffffff', 0.45),
-        '--kai-rim': mix(secondary, '#ffffff', 0.55),
         '--kai-halo': mix(mix(primary, accent, 0.4), KAI_INK, 0.55),
         '--kai-shadow': primary,
+        // Iridiscencia: el principal hacia el cielo y el acento hacia el
+        // rubor amplían el degradado sin salir de los colores elegidos.
+        '--kai-ice': mix(mix(primary, '#8fe3ff', 0.45), '#ffffff', 0.15),
+        '--kai-orchid': mix(accent, blush, 0.35),
+        '--kai-sheen': mix(mix(primary, '#8fe3ff', 0.45), '#ffffff', 0.62),
     };
 }

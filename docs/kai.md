@@ -26,8 +26,9 @@ En el laboratorio:
   selector de los cuatro colores, preajustes y **«Reiniciar color original»**.
   Los colores elegidos se recuerdan en este navegador.
 - **Movimiento**: intensidad, velocidad, pausa, movimiento reducido y depuración.
-- **KAI flotante**: el compañero abajo a la derecha, con sus tamaños y el
-  estiramiento al final del scroll.
+- **KAI flotante**: el compañero abajo a la derecha, con sus tamaños, el
+  estiramiento al final del scroll y el tiempo hasta que se duerme (nunca,
+  30 s o 2 min).
 - **Juegos**: da vueltas con el cursor alrededor de KAI hasta marearlo; un clic
   le hace cosquillas.
 
@@ -70,10 +71,16 @@ No añade dependencias: usa Vue, `@vueuse/core` (ya presente en el proyecto) y S
 - **Movimiento.** Todos los canales (forma, mirada, ojos, boca, rubor) persiguen
   su objetivo con muelles amortiguados y desfasados entre sí. Además flota, deriva
   despacio, se inclina con la inercia al moverse y se aplasta al aterrizar.
-- **Material.** Degradado base con un tercer color (acento) y cuatro manchas de
-  color que orbitan dentro del cuerpo con paralaje, brillo interior en el borde,
-  línea de luz abajo y destello especular. Los lóbulos se tiñen con tonos
-  distintos del cuerpo.
+  Parpadea a veces dos veces seguidas y suele parpadear al cambiar mucho la
+  mirada; en reposo largo, cada 20–30 s hace un gesto breve y distinto.
+- **Material de vidrio.** Degradado iridiscente derivado de los colores
+  elegidos (cielo en el centro → azul → violeta en el borde) y cuatro manchas de
+  color (violeta, cielo, profundo, orquídea) que orbitan con paralaje. Como en
+  la referencia, no hay contorno: el borde se satura (fresnel), la luz que
+  atraviesa la gota se concentra en la base (cáustica) y una línea iridiscente
+  fina ilumina solo la parte inferior. Cada lóbulo que asoma tiene su propio
+  brillo, y se lee como otra esfera de vidrio superpuesta. El destello
+  especular es suave.
 - **Rostro.** Los ojos viven sobre una esfera (giran con escorzo al mirar a los
   lados) y cambian de forma: cápsula, «◠» alegre, «◡» contento, «—» cerrado,
   guiño, espiral y corazón. Rubor bajo los ojos que aparece en las emociones.
@@ -133,10 +140,15 @@ const tamano = ref<KaiDockSize>('normal');
 | `v-model:size` | `'mini' \| 'normal' \| 'grande'` | `'normal'` | 56 / 96 / 144 px. En mínimo, sin lóbulos de ambiente y con la mitad de intensidad. Botones − / + al pasar el cursor o con el foco. |
 | `overscroll` | `boolean` | `true` | Al llegar al final del scroll, la página se estira un poco con resistencia y KAI se estira con ella; al soltar, ambos vuelven con rebote. |
 | `stretchTarget` | `() => HTMLElement \| null` | `<main>` | Elemento que sube durante el estiramiento. |
+| `sleepAfter` | `number` | `90` | Segundos sin actividad (ratón, teclado, scroll, toques) hasta que se duerme; `0` = nunca. Solo tapa el reposo: cualquier estado real lo despierta. Al volver el usuario, despierta con un bostezo. |
+| `greet` | `boolean` | `true` | Saluda una vez por sesión al aparecer (se recuerda en `sessionStorage`). |
 | `colors`, `mouth`, `intensity`, `paused`, `reducedMotion` | — | — | Igual que en `KaiCharacter`. |
 
+Además, mira al cursor cuando se acerca y, al desplazarse la página, la masa
+se mece como gelatina y mira un momento hacia el contenido.
+
 Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
-`track`, etc.
+`track`, etc., y `asleep` (si está dormido).
 
 ### Props de `KaiCharacter`
 
@@ -168,6 +180,13 @@ Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
 | `track(promesa, { success?, next?, failure? })` | Acompaña una operación real: `working` hasta que se resuelve; luego `success` → `next` (por defecto `idle`) o `failure` (por defecto `error`). Si llega otra operación, solo cuenta el último resultado. |
 | `lookAt({ x, y } \| null)` | Dirige la mirada (-1…1) o la libera. |
 | `blink()`, `pause()`, `resume()` | Parpadeo puntual y pausa manual. |
+| `nudge(vx, vy)` | Empujón elástico externo, en radios/s: la masa se desplaza, se deforma por inercia y vuelve con rebote. Se ignora con movimiento reducido. |
+
+### Atributos
+
+La raíz del personaje refleja `data-kai-state` (estado persistente) y
+`data-kai-reaction` (gesto en curso). Solo cambian con el estado, no en cada
+fotograma: sirven para estilos y pruebas.
 
 ### Eventos
 
@@ -178,7 +197,7 @@ Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
 
 | Estado | Clave | Cómo se distingue |
 | --- | --- | --- |
-| Reposo | `idle` | Flota y respira; cada ~15 s le salen un lóbulo grande abajo a la izquierda y otro pequeño al lado, y entre ciclos una gotita brota arriba, se suelta, flota y vuelve. Dos motas orbitan. |
+| Reposo | `idle` | Flota y respira; cada ~15 s le salen un lóbulo grande abajo a la izquierda y otro pequeño al lado, y entre ciclos una gotita brota arriba, se suelta, flota y vuelve. Dos motas orbitan. Cada 20–30 s, un gesto breve al azar (nunca el mismo dos veces): mirar alrededor, sacudirse como un cachorro mojado o tararear una nota. Si alguien le está mirando, no aparta la vista. |
 | Atento | `attentive` | Los ojos van primero; el cuerpo se inclina después. |
 | Curioso | `curious` | Se estira hacia donde mira y asoma un lóbulo. |
 | Pensando | `thinking` | Ondula; una gota sube como una idea y vuelve. |
@@ -226,6 +245,8 @@ Reglas de transición:
   segundos. Después descansa 5 s antes de poder marearse otra vez. El listener
   es pasivo y solo existe mientras KAI es visible.
 - **Cosquillas**: un clic o toque lo hace reír.
+- **Mirada**: también con `playful`, mira al cursor cuando pasa cerca (hasta
+  ~300–560 px según su tamaño).
 
 ## Accesibilidad y rendimiento
 
@@ -240,8 +261,10 @@ Reglas de transición:
 - La animación se detiene fuera de la vista (IntersectionObserver), con la
   pestaña oculta y en pausa. Todas las instancias comparten un único
   `requestAnimationFrame`; con más de cuatro activas, las pequeñas van a 30 fps.
-- Coste medido en Chromium: ~0,6 ms por fotograma en reposo a 300 px, ~0,25 ms
+- Coste medido en Chromium: ~0,6 ms por fotograma en reposo a 300 px, ~0,2 ms
   a 112 px; la galería del laboratorio (25 instancias) se mantiene en ~56–60 fps.
+- Con movimiento reducido no hay gelatina con el scroll ni estiramiento; el
+  saludo y el sueño se leen solo por la expresión.
 
 ## Limitaciones y ajustes pendientes
 

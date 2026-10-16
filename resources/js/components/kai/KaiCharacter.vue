@@ -109,6 +109,8 @@ const ids = {
     clip: `kai-${uid}-clip`,
     base: `kai-${uid}-base`,
     rim: `kai-${uid}-rim`,
+    caustic: `kai-${uid}-caustic`,
+    lens: `kai-${uid}-lens`,
     shadow: `kai-${uid}-shadow`,
     specular: `kai-${uid}-specular`,
     dots: [`kai-${uid}-dot-a`, `kai-${uid}-dot-b`, `kai-${uid}-dot-c`],
@@ -149,6 +151,7 @@ const faceEl = ref<SVGGElement | null>(null);
 type Slots = (Element | null)[];
 const blobEls: Slots = [];
 const satEls: Slots = [];
+const lensEls: Slots = [];
 const dotEls: Slots = [];
 const specularEl = ref<SVGEllipseElement | null>(null);
 const blushEls: Slots = [];
@@ -215,8 +218,11 @@ function render() {
     f.sats.forEach((s, i) => {
         // Satélites del fluido: tinte dentro del cuerpo. Gotitas: esferas aparte.
         const tint = satEls[i];
+        const lens = lensEls[i];
         const dot = dotEls[i];
-        attr(tint, 'visibility', s.visible && !s.dot ? 'visible' : 'hidden');
+        const merged = s.visible && !s.dot;
+        attr(tint, 'visibility', merged ? 'visible' : 'hidden');
+        attr(lens, 'visibility', merged && s.lens > 0 ? 'visible' : 'hidden');
         attr(dot, 'visibility', s.visible && s.dot ? 'visible' : 'hidden');
 
         if (s.visible) {
@@ -224,6 +230,14 @@ function render() {
             attr(el, 'cx', s.cx);
             attr(el, 'cy', s.cy);
             attr(el, 'r', s.r);
+        }
+
+        if (merged && s.lens > 0) {
+            // Brillo propio, desplazado hacia la luz (arriba a la izquierda).
+            attr(lens, 'cx', Math.round((s.cx - s.r * 0.18) * 100) / 100);
+            attr(lens, 'cy', Math.round((s.cy - s.r * 0.22) * 100) / 100);
+            attr(lens, 'r', Math.round(s.r * 82) / 100);
+            attr(lens, 'opacity', s.lens);
         }
     });
 
@@ -409,6 +423,9 @@ watch(
     },
 );
 
+// Gesto en curso, también como atributo (`data-kai-reaction`) para estilos y pruebas.
+const reaction = ref<KaiReaction | null>(null);
+
 const offEvents = [
     engine.on('stateChange', (payload) => {
         if (state.value !== payload.to) {
@@ -417,8 +434,17 @@ const offEvents = [
 
         emit('stateChange', payload);
     }),
-    engine.on('reactionStart', (payload) => emit('reactionStart', payload)),
-    engine.on('reactionEnd', (payload) => emit('reactionEnd', payload)),
+    engine.on('reactionStart', (payload) => {
+        reaction.value = payload.name;
+        emit('reactionStart', payload);
+    }),
+    engine.on('reactionEnd', (payload) => {
+        if (reaction.value === payload.name) {
+            reaction.value = null;
+        }
+
+        emit('reactionEnd', payload);
+    }),
 ];
 
 /* ── Mirada ──────────────────────────────────────────────────────────── */
@@ -521,14 +547,29 @@ useEventListener(
         const dx = event.clientX - c.cx;
         const dy = event.clientY - c.cy;
         const dist = Math.hypot(dx, dy);
+        // Mira al cursor desde lejos; las vueltas cuentan solo de cerca.
         const zone = Math.max(170, c.rect.width * 1.9);
+        const lookZone = Math.min(560, Math.max(300, c.rect.width * 3));
 
-        if (dist < c.rect.width * 0.22 || dist > zone) {
+        if (dist < c.rect.width * 0.22 || dist > lookZone) {
             lastAngle = null;
 
             if (!props.followPointer) {
                 releaseGaze();
             }
+
+            return;
+        }
+
+        if (!props.followPointer) {
+            const k = 2.4 / lookZone;
+            engine.lookAt({ x: dx * k, y: dy * k });
+            pointerGaze = true;
+            wake();
+        }
+
+        if (dist > zone) {
+            lastAngle = null;
 
             return;
         }
@@ -543,12 +584,6 @@ useEventListener(
         }
 
         lastAngle = angle;
-
-        if (!props.followPointer) {
-            engine.lookAt({ x: (dx / zone) * 2.2, y: (dy / zone) * 2.2 });
-            pointerGaze = true;
-            wake();
-        }
 
         // Unas vueltas seguidas (2,5 netas): se marea.
         if (Math.abs(spin) > TAU * 2.5 && now > dizzyUntil) {
@@ -636,6 +671,12 @@ function blink() {
     wake();
 }
 
+/** Empujón elástico externo, en radios/s (p. ej. el scroll de la página). */
+function nudge(vx: number, vy: number) {
+    engine.nudge(vx, vy);
+    wake();
+}
+
 function pause() {
     manualPause.value = true;
 }
@@ -654,7 +695,17 @@ function inspect() {
     };
 }
 
-defineExpose({ setState, react, track, lookAt, blink, pause, resume, inspect });
+defineExpose({
+    setState,
+    react,
+    track,
+    lookAt,
+    blink,
+    nudge,
+    pause,
+    resume,
+    inspect,
+});
 
 onMounted(() => {
     render();
@@ -677,6 +728,8 @@ onBeforeUnmount(() => {
         class="kai"
         :class="{ 'kai--animate-size': animateSize, 'kai--playful': playful }"
         :data-surface="surface"
+        :data-kai-state="state"
+        :data-kai-reaction="reaction || undefined"
         :data-small="px < 64 || undefined"
         :style="{ width: `${px}px`, height: `${px}px`, ...palette }"
         :role="label ? 'img' : undefined"
@@ -705,8 +758,9 @@ onBeforeUnmount(() => {
                     gradientUnits="userSpaceOnUse"
                     :r="R * 1.25"
                 >
-                    <stop offset="0" class="kai-stop-mid" />
-                    <stop offset="0.5" class="kai-stop-primary" />
+                    <stop offset="0" class="kai-stop-ice" />
+                    <stop offset="0.48" class="kai-stop-primary" />
+                    <stop offset="0.84" class="kai-stop-accent" />
                     <stop offset="1" class="kai-stop-deep" />
                 </radialGradient>
                 <linearGradient :id="ids.rim" x1="0" y1="0" x2="0" y2="1">
@@ -714,11 +768,40 @@ onBeforeUnmount(() => {
                     <stop offset="0.55" class="kai-stop-rim-mid" />
                     <stop offset="1" class="kai-stop-rim-bottom" />
                 </linearGradient>
+                <!-- Luz que atraviesa la gota y se concentra en la base -->
+                <linearGradient :id="ids.caustic" x1="0" y1="0" x2="0" y2="1">
+                    <stop
+                        offset="0.5"
+                        class="kai-stop-sheen"
+                        stop-opacity="0"
+                    />
+                    <stop
+                        offset="0.82"
+                        class="kai-stop-sheen"
+                        stop-opacity="0.45"
+                    />
+                    <stop offset="1" class="kai-stop-sheen" stop-opacity="1" />
+                </linearGradient>
+                <!-- Cada lóbulo, una esfera: centro luminoso y pliegue suave -->
+                <radialGradient :id="ids.lens" cx="0.42" cy="0.38" r="0.62">
+                    <stop
+                        offset="0"
+                        class="kai-stop-white"
+                        stop-opacity="0.34"
+                    />
+                    <stop
+                        offset="0.5"
+                        class="kai-stop-ice"
+                        stop-opacity="0.14"
+                    />
+                    <stop offset="0.82" class="kai-stop-ice" stop-opacity="0" />
+                    <stop offset="1" class="kai-stop-deep" stop-opacity="0.2" />
+                </radialGradient>
                 <radialGradient :id="ids.specular">
                     <stop
                         offset="0"
                         class="kai-stop-white"
-                        stop-opacity="0.9"
+                        stop-opacity="0.62"
                     />
                     <stop offset="1" class="kai-stop-white" stop-opacity="0" />
                 </radialGradient>
@@ -804,7 +887,7 @@ onBeforeUnmount(() => {
                     />
                     <ellipse
                         :ref="slot(blobEls, 1)"
-                        class="kai-blob kai-blob--light"
+                        class="kai-blob kai-blob--ice"
                     />
                     <ellipse
                         :ref="slot(blobEls, 2)"
@@ -812,7 +895,7 @@ onBeforeUnmount(() => {
                     />
                     <ellipse
                         :ref="slot(blobEls, 3)"
-                        class="kai-blob kai-blob--accent-light"
+                        class="kai-blob kai-blob--orchid"
                     />
                     <circle
                         v-for="i in MAX_SATS"
@@ -824,9 +907,23 @@ onBeforeUnmount(() => {
                     />
                     <use ref="coolEl" :href="shapeHref" class="kai-cool" />
                     <use ref="glowEl" :href="shapeHref" class="kai-glow" />
-                    <use :href="shapeHref" class="kai-inner-rim" />
+                    <!-- Borde más saturado y base luminosa: volumen de vidrio -->
+                    <use :href="shapeHref" class="kai-edge" />
+                    <use
+                        :href="shapeHref"
+                        class="kai-caustic"
+                        :stroke="url(ids.caustic)"
+                    />
                     <ellipse ref="highlightEl" class="kai-highlight" />
                 </g>
+                <circle
+                    v-for="i in MAX_SATS"
+                    :key="`lens-${i}`"
+                    :ref="slot(lensEls, i - 1)"
+                    class="kai-lens"
+                    :fill="url(ids.lens)"
+                    visibility="hidden"
+                />
                 <!-- Rubor: capa propia con desenfoque suave para que se lea -->
                 <g :filter="url(ids.blush)">
                     <ellipse
@@ -923,10 +1020,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .kai {
     --kai-ink: #151924;
-    --kai-edge: rgba(255, 255, 255, 0.85);
-    --kai-rim-top: rgba(255, 255, 255, 0.2);
-    --kai-rim-mid: rgba(255, 255, 255, 0.35);
-    --kai-rim-bottom: rgba(255, 255, 255, 0.95);
+    --kai-rim-top-alpha: 0.14;
     --kai-shadow-alpha: 0.32;
 
     position: relative;
@@ -947,8 +1041,7 @@ onBeforeUnmount(() => {
 
 .kai[data-surface='dark'],
 :root.dark .kai[data-surface='auto'] {
-    --kai-rim-top: rgba(255, 255, 255, 0.3);
-    --kai-rim-mid: rgba(255, 255, 255, 0.45);
+    --kai-rim-top-alpha: 0.22;
     --kai-shadow-alpha: 0.24;
 }
 
@@ -976,6 +1069,14 @@ onBeforeUnmount(() => {
     stop-color: #ffffff;
 }
 
+.kai-stop-ice {
+    stop-color: var(--kai-ice);
+}
+
+.kai-stop-sheen {
+    stop-color: var(--kai-sheen);
+}
+
 .kai-specular {
     pointer-events: none;
 }
@@ -990,17 +1091,17 @@ onBeforeUnmount(() => {
 
 .kai-stop-rim-top {
     stop-color: #ffffff;
-    stop-opacity: 0.25;
+    stop-opacity: var(--kai-rim-top-alpha);
 }
 
 .kai-stop-rim-mid {
-    stop-color: #ffffff;
-    stop-opacity: 0.35;
+    stop-color: var(--kai-sheen);
+    stop-opacity: 0;
 }
 
 .kai-stop-rim-bottom {
-    stop-color: #ffffff;
-    stop-opacity: 0.95;
+    stop-color: var(--kai-sheen);
+    stop-opacity: 1;
 }
 
 .kai-stop-shadow {
@@ -1015,12 +1116,12 @@ onBeforeUnmount(() => {
 
 .kai-blob--accent {
     fill: var(--kai-accent);
-    opacity: 0.92;
+    opacity: 0.7;
 }
 
-.kai-blob--light {
-    fill: var(--kai-light);
-    opacity: 0.55;
+.kai-blob--ice {
+    fill: var(--kai-ice);
+    opacity: 0.75;
 }
 
 .kai-blob--deep {
@@ -1028,9 +1129,9 @@ onBeforeUnmount(() => {
     opacity: 0.55;
 }
 
-.kai-blob--accent-light {
-    fill: var(--kai-accent-light);
-    opacity: 0.7;
+.kai-blob--orchid {
+    fill: var(--kai-orchid);
+    opacity: 0.85;
 }
 
 .kai-sat {
@@ -1049,12 +1150,22 @@ onBeforeUnmount(() => {
     fill: var(--kai-light);
 }
 
-/* Brillo interior del borde: da volumen de gota translúcida. */
-.kai-inner-rim {
+/* Fresnel: el borde se satura; la base se ilumina con la luz que cruza. */
+.kai-edge {
     fill: none;
-    stroke: var(--kai-rim);
-    stroke-width: 6;
-    opacity: 0.6;
+    stroke: var(--kai-deep);
+    stroke-width: 12;
+    opacity: 0.38;
+}
+
+.kai-caustic {
+    fill: none;
+    stroke-width: 11;
+    opacity: 0.85;
+}
+
+.kai-lens {
+    pointer-events: none;
 }
 
 .kai-highlight {
@@ -1068,7 +1179,7 @@ onBeforeUnmount(() => {
 
 .kai-rim-line {
     fill: none;
-    stroke-width: 2.2;
+    stroke-width: 1.7;
 }
 
 .kai-shadow {

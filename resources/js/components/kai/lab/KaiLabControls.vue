@@ -43,6 +43,12 @@ const motionOptions: { value: KaiReducedMotion; label: string }[] = [
     { value: 'no-preference', label: 'Completo' },
 ];
 
+const sleepOptions: { value: number; label: string }[] = [
+    { value: 0, label: 'Nunca' },
+    { value: 30, label: '30 s' },
+    { value: 120, label: '2 min' },
+];
+
 const dockSizes: { value: KaiDockSize; label: string }[] = [
     { value: 'mini', label: 'Mínimo' },
     { value: 'normal', label: 'Normal' },
@@ -416,6 +422,32 @@ function isDefaultColors(): boolean {
                 />
                 <span>Estirarse al final del scroll</span>
             </label>
+            <fieldset class="klc-fieldset" :disabled="!settings.dock">
+                <legend class="klc-legend">Dormir tras inactividad</legend>
+                <div class="klc-segment">
+                    <label
+                        v-for="option in sleepOptions"
+                        :key="option.value"
+                        class="klc-segment-item"
+                    >
+                        <input
+                            type="radio"
+                            :name="`${uid}-dock-sleep`"
+                            :value="option.value"
+                            :data-dock-sleep="option.value"
+                            :checked="settings.dockSleep === option.value"
+                            @change="
+                                emit('update', { dockSleep: option.value })
+                            "
+                        />
+                        <span>{{ option.label }}</span>
+                    </label>
+                </div>
+            </fieldset>
+            <p class="klc-hint">
+                Al volver a mover el ratón o desplazarte, despierta con un
+                bostezo. Al hacer scroll se mece y mira el contenido.
+            </p>
         </section>
 
         <section class="klc-group" :aria-labelledby="`${uid}-games`">

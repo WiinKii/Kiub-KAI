@@ -5,9 +5,24 @@
  * Tres tamaños (mínimo, normal, grande): en mínimo los gestos se contienen y
  * se apagan los lóbulos y motas de ambiente. Opcionalmente se estira cuando
  * la página llega al final del scroll.
+ *
+ * Presencia: saluda una vez por sesión, se mece como gelatina cuando la
+ * página se desplaza (y mira el contenido), y se duerme tras un rato sin
+ * actividad; al volver el usuario, despierta con un bostezo.
  */
-import { usePreferredReducedMotion } from '@vueuse/core';
-import { computed, ref, watch } from 'vue';
+import {
+    useEventListener,
+    useIntervalFn,
+    usePreferredReducedMotion,
+} from '@vueuse/core';
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+} from 'vue';
 import type { KaiColors } from '@/lib/kai/palette';
 import type { KaiDockSize, KaiReducedMotion, KaiState } from '@/lib/kai/types';
 import KaiCharacter from './KaiCharacter.vue';
@@ -23,6 +38,10 @@ type Props = {
     overscroll?: boolean;
     /** Contenido que sube con el estiramiento. */
     stretchTarget?: () => HTMLElement | null;
+    /** Segundos sin actividad hasta que se duerme (0 = nunca). */
+    sleepAfter?: number;
+    /** Saluda una vez por sesión al aparecer. */
+    greet?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -33,6 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
     reducedMotion: 'auto',
     overscroll: true,
     stretchTarget: () => document.querySelector<HTMLElement>('main'),
+    sleepAfter: 90,
+    greet: true,
 });
 
 const state = defineModel<KaiState>('state', { default: 'idle' });
@@ -77,8 +98,113 @@ watch(size, () => {
     void kai.value?.react('boing');
 });
 
+/* ── Sueño por inactividad ───────────────────────────────────────────── */
+const asleep = ref(false);
+let lastActivity = Date.now();
+
+// Dormido solo «tapa» el reposo: cualquier estado real lo despierta.
+const shown = computed<KaiState>(() =>
+    asleep.value && state.value === 'idle' ? 'sleeping' : state.value,
+);
+
+function onState(next: KaiState) {
+    if (asleep.value && next === 'sleeping') {
+        return;
+    }
+
+    asleep.value = false;
+    state.value = next;
+}
+
+function activity() {
+    lastActivity = Date.now();
+
+    if (asleep.value) {
+        asleep.value = false;
+        // Tras volver al reposo: si no, el cambio de estado cortaría el bostezo.
+        void nextTick(() => kai.value?.react('yawn'));
+    }
+}
+
+// Sin objetivo explícito, VueUse escucha en `window` (y nada en SSR).
+useEventListener(
+    ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'],
+    activity,
+    { passive: true },
+);
+
+useIntervalFn(() => {
+    if (
+        props.sleepAfter > 0 &&
+        !asleep.value &&
+        !props.paused &&
+        state.value === 'idle' &&
+        Date.now() - lastActivity > props.sleepAfter * 1000
+    ) {
+        asleep.value = true;
+    }
+}, 2000);
+
+/* ── La página se desplaza: gelatina y mirada al contenido ───────────── */
+let lastScroll = 0;
+let lookTimer = 0;
+
+useEventListener(
+    'scroll',
+    () => {
+        const y = window.scrollY;
+        const dy = y - lastScroll;
+        lastScroll = y;
+        activity();
+
+        if (!dy || reduced.value || props.paused || !kai.value) {
+            return;
+        }
+
+        // El contenido arrastra un poco la masa, que vuelve con rebote.
+        kai.value.nudge(0, Math.max(-1.2, Math.min(1.2, -dy * 0.012)));
+        kai.value.lookAt({ x: -0.55, y: dy > 0 ? 0.15 : -0.5 });
+        window.clearTimeout(lookTimer);
+        lookTimer = window.setTimeout(() => kai.value?.lookAt(null), 800);
+    },
+    { passive: true },
+);
+
+/* ── Saludo: una vez por sesión ──────────────────────────────────────── */
+const GREETED_KEY = 'kiub.kai.greeted';
+let greetTimer = 0;
+
+onMounted(() => {
+    lastScroll = window.scrollY;
+
+    if (!props.greet) {
+        return;
+    }
+
+    try {
+        if (window.sessionStorage.getItem(GREETED_KEY)) {
+            return;
+        }
+
+        window.sessionStorage.setItem(GREETED_KEY, '1');
+    } catch {
+        // Sin almacenamiento: saluda en cada carga, sin más consecuencias.
+    }
+
+    greetTimer = window.setTimeout(() => {
+        if (state.value === 'idle') {
+            void kai.value?.react('welcome');
+        }
+    }, 900);
+});
+
+onBeforeUnmount(() => {
+    window.clearTimeout(lookTimer);
+    window.clearTimeout(greetTimer);
+});
+
 /** `dock.value?.kai?.react('welcome')`, `track(...)`, etc. */
-defineExpose({ kai });
+defineExpose({ kai, asleep });
 </script>
 
 <template>
@@ -86,7 +212,7 @@ defineExpose({ kai });
         <div class="kai-dock-body">
             <KaiCharacter
                 ref="kai"
-                v-model:state="state"
+                :state="shown"
                 :size="px"
                 animate-size
                 playful
@@ -97,6 +223,7 @@ defineExpose({ kai });
                 :paused="paused"
                 :reduced-motion="reducedMotion"
                 :pull="pull"
+                @update:state="onState"
             />
         </div>
         <div class="kai-dock-controls" role="group" aria-label="Tamaño de KAI">

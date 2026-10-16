@@ -19,6 +19,8 @@ export type LabSettings = {
     dock: boolean;
     dockSize: KaiDockSize;
     overscroll: boolean;
+    /** Segundos sin actividad hasta que el KAI flotante se duerme (0 = nunca). */
+    dockSleep: number;
 };
 
 export const DEFAULT_SETTINGS: LabSettings = {
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: LabSettings = {
     dock: true,
     dockSize: 'normal',
     overscroll: true,
+    dockSleep: 30,
 };
 
 const COLOR_KEY = 'kiub.kai-lab.colors';

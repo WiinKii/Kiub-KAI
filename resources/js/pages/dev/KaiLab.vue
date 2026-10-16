@@ -371,6 +371,7 @@ await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pr
             :paused="settings.paused"
             :reduced-motion="settings.motion"
             :overscroll="settings.overscroll"
+            :sleep-after="settings.dockSleep"
             :stretch-target="() => labRoot"
         />
     </Teleport>

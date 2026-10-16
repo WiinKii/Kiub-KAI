@@ -74,6 +74,8 @@ export type SatFrame = {
     cx: number;
     cy: number;
     r: number;
+    /** Cuánto asoma fuera del cuerpo (0-1): brillo de esfera propia. */
+    lens: number;
 };
 export type SpriteFrame = {
     visible: boolean;
@@ -148,6 +150,8 @@ type Listener<K extends keyof KaiEngineEvents> = (
 
 const ABSORB: SpringConfig = { w: 7, z: 0.85 };
 const SAT_DEFAULT: SpringConfig = { w: 8, z: 0.6 };
+/** Gelatina: rebote poco amortiguado tras un empujón externo. */
+const JELLY: SpringConfig = { w: 9, z: 0.26 };
 const TAU = Math.PI * 2;
 
 function mulberry32(seed: number): () => number {
@@ -238,6 +242,8 @@ export class KaiEngine {
     private spiralSpin = 0;
 
     private look: KaiGaze | null = null;
+    /** Desplazamiento elástico por empujones externos (en radios). */
+    private jelly = { x: 0, y: 0, vx: 0, vy: 0 };
     private intensity = 1;
     private intensityNow = 1;
     private sizeFactor = 1;
@@ -308,6 +314,7 @@ export class KaiEngine {
                 cx: 0,
                 cy: 0,
                 r: 0,
+                lens: 0,
             })),
             highlight: { ...blob(), angle: 0 },
             specular: { ...blob(), angle: 0 },
@@ -452,6 +459,20 @@ export class KaiEngine {
         if (!this.reduced) {
             this.blinkStart = this.time;
         }
+    }
+
+    /**
+     * Empujón externo (p. ej. el scroll de la página), en radios/s: la masa
+     * se desplaza un poco, se deforma por inercia y vuelve con rebote.
+     */
+    nudge(vx: number, vy: number): void {
+        if (this.reduced) {
+            return;
+        }
+
+        const j = this.jelly;
+        j.vx = clamp(j.vx + vx, -4, 4);
+        j.vy = clamp(j.vy + vy, -4, 4);
     }
 
     /** Estiramiento externo (final del scroll), 0-1. Al soltar, rebota. */
@@ -730,6 +751,7 @@ export class KaiEngine {
     private resetRig(): void {
         this.rigTimers.clear();
         this.rigOnce.clear();
+        this.rigContext.mem = {};
     }
 
     private createRigContext(): RigContext {
@@ -808,6 +830,8 @@ export class KaiEngine {
                 return false;
             },
             rand: () => this.random(),
+            engaged: false,
+            mem: {},
         };
 
         return ctx;
@@ -903,6 +927,7 @@ export class KaiEngine {
         ctx.t =
             this.time - (this.reaction ? this.reactionStart : this.stateStart);
         ctx.ambient = this.ambient;
+        ctx.engaged = this.look !== null;
         ctx.gx = this.value.gx;
         ctx.gy = this.value.gy;
         rig(ctx);
@@ -992,6 +1017,18 @@ export class KaiEngine {
             if (this.time >= this.nextSaccade) {
                 const angle = this.random() * TAU;
                 const amount = behavior.saccade.amount * this.between(0.5, 1);
+
+                // Un cambio de mirada grande suele ir con un parpadeo.
+                if (
+                    amount > behavior.saccade.amount * 0.8 &&
+                    this.blinkStart < 0 &&
+                    this.value.closeL < 0.3 &&
+                    this.value.closeR < 0.3 &&
+                    this.random() < 0.4
+                ) {
+                    this.blinkStart = this.time;
+                }
+
                 this.saccade = {
                     x: Math.cos(angle) * amount,
                     y: Math.sin(angle) * amount * 0.6,
@@ -1108,6 +1145,10 @@ export class KaiEngine {
                 );
             }
 
+            const j = this.jelly;
+            [j.x, j.vx] = springStep(j.x, j.vx, 0, JELLY, STEP);
+            [j.y, j.vy] = springStep(j.y, j.vy, 0, JELLY, STEP);
+
             this.intensityNow +=
                 (this.intensity - this.intensityNow) * Math.min(1, STEP * 6);
             this.acc -= STEP;
@@ -1156,6 +1197,8 @@ export class KaiEngine {
             this.out('y') * R -
             float * 0.05 * R * Math.sin(this.floatPhase * TAU) +
             drift * 0.02 * R * Math.sin(this.time * 0.37);
+        out.x += this.jelly.x * R * amp;
+        out.y += this.jelly.y * R * amp;
 
         return out;
     }
@@ -1172,8 +1215,8 @@ export class KaiEngine {
         const c = this.bodyCenter(this.center);
 
         // Inercia: la masa se queda atrás respecto al movimiento.
-        const velX = this.reduced ? 0 : this.velocity.x;
-        const velY = this.reduced ? 0 : this.velocity.y;
+        const velX = this.reduced ? 0 : this.velocity.x + this.jelly.vx;
+        const velY = this.reduced ? 0 : this.velocity.y + this.jelly.vy;
         const lagX = clamp(-velX * 0.05, -0.14, 0.14) * amp;
         const lagY = clamp(-velY * 0.05, -0.14, 0.14) * amp;
 
@@ -1244,6 +1287,18 @@ export class KaiEngine {
             }
 
             out.r = n2(sat.r * 1.25);
+
+            // Un lóbulo que asoma se lee como otra esfera de vidrio.
+            const dx = sat.x - origin.x;
+            const dy = sat.y - origin.y;
+            const bin =
+                Math.floor(((Math.atan2(dy, dx) + Math.PI) / TAU) * BINS) %
+                BINS;
+            const edge = this.radii[bin];
+            out.lens = n2(
+                clamp((Math.hypot(dx, dy) + sat.r * 0.3 - edge) / sat.r, 0, 1),
+            );
+
             this.balls.push({
                 x: sat.x,
                 y: sat.y,

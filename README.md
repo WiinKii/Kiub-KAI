@@ -54,7 +54,8 @@ Las rutas de **Comunicaciones** y **Calendario** están como `/comunicaciones` y
 divide, saca manitas y suelta gotas (campo de metabolas en SVG, sin
 dependencias nuevas). Componentes `KaiCharacter.vue` y `KaiDock.vue`
 (compañero flotante abajo a la derecha, con tamaños y estiramiento al final del
-scroll) en `resources/js/components/kai/`, y su motor en `resources/js/lib/kai/`.
+scroll; saluda, mira al cursor, se mece con el scroll y se duerme si no hay
+actividad) en `resources/js/components/kai/`, y su motor en `resources/js/lib/kai/`.
 De momento solo se muestra en el laboratorio de desarrollo **`/dev/kai`**
 (colores, boca, rubor, juegos y todos los estados), que se registra únicamente
 en local (`routes/dev.php`, incluido desde `routes/web.php`).

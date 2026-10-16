@@ -82,6 +82,8 @@ export type KaiController = {
     ) => Promise<T>;
     lookAt: (gaze: KaiGaze | null) => void;
     blink: () => void;
+    /** Empujón elástico externo, en radios/s (se ignora en movimiento reducido). */
+    nudge: (vx: number, vy: number) => void;
     pause: () => void;
     resume: () => void;
 };
