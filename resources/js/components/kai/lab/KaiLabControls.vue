@@ -2,15 +2,22 @@
 import { useId } from 'vue';
 import {
     KAI_REACTIONS,
-    KAI_STATES,
     REACTION_CATALOG,
     STATE_CATALOG,
+    STATE_GROUPS,
 } from '@/lib/kai/catalog';
-import type { KaiReaction, KaiReducedMotion, KaiState } from '@/lib/kai/types';
+import { KAI_DEFAULT_COLORS, KAI_PRESETS, isHexColor } from '@/lib/kai/palette';
+import type { KaiColors } from '@/lib/kai/palette';
+import type {
+    KaiDockSize,
+    KaiReaction,
+    KaiReducedMotion,
+    KaiState,
+} from '@/lib/kai/types';
 import type { LabSettings } from './settings';
 import { SEQUENCES } from './useKaiSequence';
 
-defineProps<{
+const props = defineProps<{
     state: KaiState;
     reaction: KaiReaction | null;
     settings: LabSettings;
@@ -36,8 +43,35 @@ const motionOptions: { value: KaiReducedMotion; label: string }[] = [
     { value: 'no-preference', label: 'Completo' },
 ];
 
+const dockSizes: { value: KaiDockSize; label: string }[] = [
+    { value: 'mini', label: 'Mínimo' },
+    { value: 'normal', label: 'Normal' },
+    { value: 'grande', label: 'Grande' },
+];
+
+const colorFields: { key: keyof KaiColors; label: string }[] = [
+    { key: 'primary', label: 'Principal' },
+    { key: 'secondary', label: 'Secundario' },
+    { key: 'accent', label: 'Acento' },
+    { key: 'blush', label: 'Rubor' },
+];
+
 function onRange(key: 'intensity' | 'timeScale', event: Event) {
     emit('update', { [key]: Number((event.target as HTMLInputElement).value) });
+}
+
+function setColor(key: keyof KaiColors, value: string) {
+    if (isHexColor(value)) {
+        emit('update', { colors: { ...props.settings.colors, [key]: value } });
+    }
+}
+
+function isDefaultColors(): boolean {
+    return (Object.keys(KAI_DEFAULT_COLORS) as (keyof KaiColors)[]).every(
+        (key) =>
+            props.settings.colors[key].toLowerCase() ===
+            KAI_DEFAULT_COLORS[key].toLowerCase(),
+    );
 }
 </script>
 
@@ -50,27 +84,30 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
             <p class="klc-hint">
                 Se mantienen hasta que la interfaz los cambia.
             </p>
-            <div class="klc-grid">
-                <button
-                    v-for="key in KAI_STATES"
-                    :key="key"
-                    type="button"
-                    class="klc-chip"
-                    :data-state="key"
-                    :aria-pressed="state === key ? 'true' : 'false'"
-                    @click="emit('setState', key)"
-                >
-                    {{ STATE_CATALOG[key].label }}
-                </button>
-            </div>
+            <template v-for="group in STATE_GROUPS" :key="group.label">
+                <p class="klc-subtitle">{{ group.label }}</p>
+                <div class="klc-grid">
+                    <button
+                        v-for="key in group.states"
+                        :key="key"
+                        type="button"
+                        class="klc-chip"
+                        :data-state="key"
+                        :aria-pressed="state === key ? 'true' : 'false'"
+                        @click="emit('setState', key)"
+                    >
+                        {{ STATE_CATALOG[key].label }}
+                    </button>
+                </div>
+            </template>
         </section>
 
         <section class="klc-group" :aria-labelledby="`${uid}-reactions`">
             <h2 :id="`${uid}-reactions`" class="klc-title">
-                Reacciones temporales
+                Reacciones y animaciones
             </h2>
             <p class="klc-hint">
-                Gestos breves: vuelven solos al estado vigente.
+                Gestos temporales: vuelven solos al estado vigente.
             </p>
             <div class="klc-grid">
                 <button
@@ -135,9 +172,90 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
             </p>
         </section>
 
+        <section class="klc-group" :aria-labelledby="`${uid}-look`">
+            <h2 :id="`${uid}-look`" class="klc-title">Apariencia</h2>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    data-mouth
+                    :checked="settings.mouth"
+                    @change="emit('update', { mouth: !settings.mouth })"
+                />
+                <span>Boca (prueba)</span>
+            </label>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    :checked="settings.blush"
+                    @change="emit('update', { blush: !settings.blush })"
+                />
+                <span>Rubor en las emociones</span>
+            </label>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    :checked="settings.ambient"
+                    @change="emit('update', { ambient: !settings.ambient })"
+                />
+                <span>Lóbulos y motas de ambiente</span>
+            </label>
+
+            <fieldset class="klc-fieldset">
+                <legend class="klc-legend">Color de KAI</legend>
+                <div class="klc-colors">
+                    <label
+                        v-for="field in colorFields"
+                        :key="field.key"
+                        class="klc-color"
+                    >
+                        <input
+                            type="color"
+                            :data-color="field.key"
+                            :value="settings.colors[field.key]"
+                            @input="
+                                setColor(
+                                    field.key,
+                                    ($event.target as HTMLInputElement).value,
+                                )
+                            "
+                        />
+                        <span>{{ field.label }}</span>
+                        <code>{{ settings.colors[field.key] }}</code>
+                    </label>
+                </div>
+                <div class="klc-grid klc-presets">
+                    <button
+                        v-for="preset in KAI_PRESETS.slice(1)"
+                        :key="preset.id"
+                        type="button"
+                        class="klc-chip klc-chip--small"
+                        @click="
+                            emit('update', { colors: { ...preset.colors } })
+                        "
+                    >
+                        <span class="klc-swatch" aria-hidden="true">
+                            <i :style="{ background: preset.colors.primary }" />
+                            <i :style="{ background: preset.colors.accent }" />
+                        </span>
+                        {{ preset.label }}
+                    </button>
+                </div>
+                <button
+                    type="button"
+                    class="klc-chip klc-reset"
+                    data-reset-colors
+                    :disabled="isDefaultColors()"
+                    @click="
+                        emit('update', { colors: { ...KAI_DEFAULT_COLORS } })
+                    "
+                >
+                    Reiniciar color original
+                </button>
+            </fieldset>
+        </section>
+
         <section class="klc-group" :aria-labelledby="`${uid}-motion`">
             <h2 :id="`${uid}-motion`" class="klc-title">Movimiento</h2>
-
             <div class="klc-row">
                 <button
                     type="button"
@@ -173,9 +291,9 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
 
             <div class="klc-range">
                 <label :for="`${uid}-intensity`">Intensidad</label>
-                <output :for="`${uid}-intensity`">
-                    {{ Math.round(settings.intensity * 100) }} %
-                </output>
+                <output :for="`${uid}-intensity`"
+                    >{{ Math.round(settings.intensity * 100) }} %</output
+                >
                 <input
                     :id="`${uid}-intensity`"
                     type="range"
@@ -189,9 +307,9 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
 
             <div class="klc-range">
                 <label :for="`${uid}-speed`">Velocidad</label>
-                <output :for="`${uid}-speed`">
-                    {{ settings.timeScale.toFixed(2) }}×
-                </output>
+                <output :for="`${uid}-speed`"
+                    >{{ settings.timeScale.toFixed(2) }}×</output
+                >
                 <input
                     :id="`${uid}-speed`"
                     type="range"
@@ -252,6 +370,76 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
                 <span>Guía de contorno (círculo en reposo y suelo)</span>
             </label>
         </section>
+
+        <section class="klc-group" :aria-labelledby="`${uid}-dock`">
+            <h2 :id="`${uid}-dock`" class="klc-title">KAI flotante</h2>
+            <p class="klc-hint">
+                Abajo a la derecha, como estará en la intranet.
+            </p>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    data-dock
+                    :checked="settings.dock"
+                    @change="emit('update', { dock: !settings.dock })"
+                />
+                <span>Mostrar en esta página</span>
+            </label>
+            <fieldset class="klc-fieldset" :disabled="!settings.dock">
+                <legend class="klc-legend">Tamaño</legend>
+                <div class="klc-segment">
+                    <label
+                        v-for="option in dockSizes"
+                        :key="option.value"
+                        class="klc-segment-item"
+                    >
+                        <input
+                            type="radio"
+                            :name="`${uid}-dock-size`"
+                            :value="option.value"
+                            :data-dock-size="option.value"
+                            :checked="settings.dockSize === option.value"
+                            @change="emit('update', { dockSize: option.value })"
+                        />
+                        <span>{{ option.label }}</span>
+                    </label>
+                </div>
+            </fieldset>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    :checked="settings.overscroll"
+                    :disabled="!settings.dock"
+                    @change="
+                        emit('update', { overscroll: !settings.overscroll })
+                    "
+                />
+                <span>Estirarse al final del scroll</span>
+            </label>
+        </section>
+
+        <section class="klc-group" :aria-labelledby="`${uid}-games`">
+            <h2 :id="`${uid}-games`" class="klc-title">Juegos</h2>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    :checked="settings.playful"
+                    @change="emit('update', { playful: !settings.playful })"
+                />
+                <span>Activar juegos</span>
+            </label>
+            <ul class="klc-tips">
+                <li>
+                    Da unas vueltas rápidas con el cursor alrededor de KAI: se
+                    marea.
+                </li>
+                <li>Púlsalo para hacerle cosquillas.</li>
+                <li>
+                    Llega al final de la página y sigue desplazando: KAI se
+                    estira.
+                </li>
+            </ul>
+        </section>
     </div>
 </template>
 
@@ -273,6 +461,15 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
     color: var(--kl-ink);
 }
 
+.klc-subtitle {
+    margin: 4px 0 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kl-ink-3);
+}
+
 .klc-hint {
     margin: -4px 0 4px;
     font-size: 13px;
@@ -291,6 +488,9 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
 }
 
 .klc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     min-height: 36px;
     padding: 0 14px;
     border: 1px solid var(--kl-line);
@@ -308,11 +508,17 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
         transform 0.2s var(--kl-spring);
 }
 
-.klc-chip:hover {
+.klc-chip--small {
+    min-height: 32px;
+    padding: 0 12px;
+    font-size: 13px;
+}
+
+.klc-chip:hover:not(:disabled) {
     border-color: var(--kl-blue);
 }
 
-.klc-chip:active {
+.klc-chip:active:not(:disabled) {
     transform: scale(0.97);
 }
 
@@ -327,7 +533,7 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
     border-style: dashed;
 }
 
-.klc-chip--stop:disabled {
+.klc-chip:disabled {
     opacity: 0.45;
     cursor: default;
 }
@@ -335,7 +541,8 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
 .klc-chip:focus-visible,
 .klc-segment-item:focus-within,
 .klc-check input:focus-visible,
-.klc-range input:focus-visible {
+.klc-range input:focus-visible,
+.klc-color:focus-within {
     outline: 3px solid var(--kl-focus);
     outline-offset: 2px;
 }
@@ -348,9 +555,15 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
 }
 
 .klc-fieldset {
+    display: grid;
+    gap: 8px;
     margin: 4px 0 0;
     padding: 0;
     border: 0;
+}
+
+.klc-fieldset:disabled {
+    opacity: 0.5;
 }
 
 .klc-legend {
@@ -367,6 +580,7 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
     border-radius: 12px;
     background: var(--kl-surface-2);
     gap: 2px;
+    justify-self: start;
 }
 
 .klc-segment-item {
@@ -433,5 +647,75 @@ function onRange(key: 'intensity' | 'timeScale', event: Event) {
     width: 18px;
     height: 18px;
     accent-color: var(--kl-blue-strong);
+}
+
+.klc-colors {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.klc-color {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    align-items: center;
+    gap: 0 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--kl-line);
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--kl-ink);
+    cursor: pointer;
+}
+
+.klc-color input {
+    grid-row: 1 / 3;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    cursor: pointer;
+}
+
+.klc-color code {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--kl-ink-3);
+}
+
+.klc-presets {
+    margin-top: 2px;
+}
+
+.klc-swatch {
+    display: inline-flex;
+}
+
+.klc-swatch i {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 1.5px solid var(--kl-surface);
+}
+
+.klc-swatch i + i {
+    margin-left: -4px;
+}
+
+.klc-reset {
+    justify-self: start;
+}
+
+.klc-tips {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    color: var(--kl-ink-2);
 }
 </style>

@@ -1,8 +1,9 @@
 # KAI · la presencia viva de Kiub
 
-Primera versión del personaje y de su sistema de interacción. Está encapsulada:
-solo aparece en el laboratorio de desarrollo y no se muestra en ninguna página
-de colaboradores.
+Segunda versión del personaje: un organismo fluido con dos ojitos que se divide,
+saca manitas, suelta gotas y vuelve a fundirse, guiado por el video de
+referencia de Interflow. Sigue encapsulado: solo aparece en el laboratorio de
+desarrollo y no se muestra en ninguna página de colaboradores.
 
 ## Abrir el laboratorio
 
@@ -18,15 +19,33 @@ La ruta solo se registra en el entorno local (con `route:cache` en producción n
 existe), usa los middleware `auth` y `verified`, y no está enlazada desde la
 navegación.
 
+En el laboratorio:
+
+- **Estados** (interacción y emociones), **reacciones** y **secuencias**.
+- **Apariencia**: boca (apagada por defecto), rubor, ambiente (lóbulos y motas),
+  selector de los cuatro colores, preajustes y **«Reiniciar color original»**.
+  Los colores elegidos se recuerdan en este navegador.
+- **Movimiento**: intensidad, velocidad, pausa, movimiento reducido y depuración.
+- **KAI flotante**: el compañero abajo a la derecha, con sus tamaños y el
+  estiramiento al final del scroll.
+- **Juegos**: da vueltas con el cursor alrededor de KAI hasta marearlo; un clic
+  le hace cosquillas.
+
 ## Archivos
 
 | Archivo | Responsabilidad |
 | --- | --- |
-| `resources/js/components/kai/KaiCharacter.vue` | Dibujo SVG, ciclo de vida, accesibilidad y API pública. |
-| `resources/js/lib/kai/shape.ts` | Geometría: contorno, conservación del área, spline, ojos, puente de gotas. |
-| `resources/js/lib/kai/motion.ts` | Parámetros de movimiento: canales de pose, muelles, tiempos. |
-| `resources/js/lib/kai/states.ts` | Estados y reacciones (pose, entrada escalonada, comportamiento). |
-| `resources/js/lib/kai/engine.ts` | Motor: transiciones, interrupciones, eventos, composición del fotograma. |
+| `resources/js/components/kai/KaiCharacter.vue` | Dibujo SVG, ciclo de vida, juegos, accesibilidad y API pública. |
+| `resources/js/components/kai/KaiDock.vue` | Compañero flotante abajo a la derecha (mínimo / normal / grande). |
+| `resources/js/components/kai/useKaiOverscroll.ts` | Estiramiento elástico de la página al llegar al final del scroll. |
+| `resources/js/lib/kai/engine.ts` | Motor: transiciones, rigs, satélites (lóbulos, manos, gotas), partículas y composición del fotograma. |
+| `resources/js/lib/kai/field.ts` | Campo de metabolas y contorno (marching squares + spline). |
+| `resources/js/lib/kai/shape.ts` | Cuerpo radial: armónicos, hervor, conservación del área y transformación. |
+| `resources/js/lib/kai/face.ts` | Ojos (cápsula, «◠», «◡», «—»), espiral, corazón y boca. |
+| `resources/js/lib/kai/sprites.ts` | Partículas: notas, corazones, zetas, estrellas, puntos. |
+| `resources/js/lib/kai/palette.ts` | Colores, preajustes y tonos derivados (`--kai-*`). |
+| `resources/js/lib/kai/motion.ts` | Canales de pose, muelles y tiempos. |
+| `resources/js/lib/kai/states.ts` | Estados y reacciones: pose, cues y rig de cada uno. |
 | `resources/js/lib/kai/ticker.ts` | Un único `requestAnimationFrame` compartido por todas las instancias. |
 | `resources/js/lib/kai/types.ts`, `catalog.ts` | Tipos públicos y textos de la interfaz. |
 | `resources/js/pages/dev/KaiLab.vue` | Página del laboratorio. |
@@ -35,15 +54,38 @@ navegación.
 
 No añade dependencias: usa Vue, `@vueuse/core` (ya presente en el proyecto) y SVG.
 
-## Por qué SVG
+## Cómo está hecho
 
-- Vectorial: nítido de 40 a 260 px sin recursos por tamaño.
-- Ligero: cada fotograma solo reescribe unos pocos atributos (`d`, `transform`);
-  Vue no vuelve a renderizar.
+- **Cuerpo fluido.** El cuerpo es una función radial (círculo + armónicos que
+  ondulan + hervor) con el área normalizada. Los lóbulos, manos y gotas son
+  *satélites* con su propio muelle. Cuerpo y satélites se suman en un campo de
+  metabolas cuyo contorno se traza con marching squares y se suaviza con una
+  spline: por eso las manos brotan del cuerpo, se estiran, se desprenden y
+  vuelven a fundirse sin costuras. Cada satélite tiene su caída en el campo:
+  baja se funde ancho; alta deja un cuello visible (manos, lóbulos).
+- **Rigs.** Cada estado y reacción tiene una función que, en cada fotograma,
+  pide los satélites que necesita (posición, tamaño, muelle) y emite
+  partículas. Los que deja de pedir se reabsorben solos, así que cualquier
+  interrupción termina fundiéndose de forma natural.
+- **Movimiento.** Todos los canales (forma, mirada, ojos, boca, rubor) persiguen
+  su objetivo con muelles amortiguados y desfasados entre sí. Además flota, deriva
+  despacio, se inclina con la inercia al moverse y se aplasta al aterrizar.
+- **Material.** Degradado base con un tercer color (acento) y cuatro manchas de
+  color que orbitan dentro del cuerpo con paralaje, brillo interior en el borde,
+  línea de luz abajo y destello especular. Los lóbulos se tiñen con tonos
+  distintos del cuerpo.
+- **Rostro.** Los ojos viven sobre una esfera (giran con escorzo al mirar a los
+  lados) y cambian de forma: cápsula, «◠» alegre, «◡» contento, «—» cerrado,
+  guiño, espiral y corazón. Rubor bajo los ojos que aparece en las emociones.
+  Boca opcional: sonrisa, «o», bostezo, ondulada y «:3».
+
+### Por qué SVG
+
+- Vectorial: nítido de 40 a 300 px sin recursos por tamaño.
+- Cada fotograma solo reescribe unos pocos atributos; Vue no vuelve a renderizar.
 - Fácil de tematizar con variables CSS (`--kai-*`) y de inspeccionar.
-- Canvas exigiría gestionar la densidad de píxeles y repintar a mano; WebGL
-  (metaballs) sería más espectacular pero más pesado, con límite de contextos
-  por página y más difícil de mantener a esta escala.
+- WebGL daría refracción real, pero con límite de contextos por página y más
+  coste de mantenimiento a esta escala.
 
 ## Uso
 
@@ -67,13 +109,49 @@ async function guardar() {
 </template>
 ```
 
-### Props
+### Compañero flotante
+
+```vue
+<script setup lang="ts">
+import { ref } from 'vue';
+import KaiDock from '@/components/kai/KaiDock.vue';
+import type { KaiDockSize, KaiState } from '@/lib/kai/types';
+
+const estado = ref<KaiState>('idle');
+const tamano = ref<KaiDockSize>('normal');
+</script>
+
+<template>
+    <!-- En el layout de la intranet, una sola vez. -->
+    <KaiDock v-model:state="estado" v-model:size="tamano" />
+</template>
+```
+
+| Prop | Tipo | Por defecto | Descripción |
+| --- | --- | --- | --- |
+| `v-model:state` | `KaiState` | `'idle'` | Estado persistente. |
+| `v-model:size` | `'mini' \| 'normal' \| 'grande'` | `'normal'` | 56 / 96 / 144 px. En mínimo, sin lóbulos de ambiente y con la mitad de intensidad. Botones − / + al pasar el cursor o con el foco. |
+| `overscroll` | `boolean` | `true` | Al llegar al final del scroll, la página se estira un poco con resistencia y KAI se estira con ella; al soltar, ambos vuelven con rebote. |
+| `stretchTarget` | `() => HTMLElement \| null` | `<main>` | Elemento que sube durante el estiramiento. |
+| `colors`, `mouth`, `intensity`, `paused`, `reducedMotion` | — | — | Igual que en `KaiCharacter`. |
+
+Expone `kai` (el `KaiController` del personaje) para llamar a `react`,
+`track`, etc.
+
+### Props de `KaiCharacter`
 
 | Prop | Tipo | Por defecto | Descripción |
 | --- | --- | --- | --- |
 | `v-model:state` | `KaiState` | `'idle'` | Estado persistente. |
 | `size` | `number \| 'sm' \| 'md' \| 'lg'` | `'md'` | Lado de la caja (48 / 120 / 240 px). Por debajo de 64 px el movimiento se contiene. |
-| `intensity` | `number` | `1` | Amplitud de los gestos (0–1.5). No altera la forma de los ojos. |
+| `colors` | `Partial<KaiColors>` | colores de Kiub | `primary`, `secondary`, `accent` (tercer color del degradado) y `blush`. |
+| `mouth` | `boolean` | `false` | Boca integrada en estados y reacciones. |
+| `blush` | `boolean` | `true` | Rubor en las emociones. |
+| `ambient` | `boolean` | `true` | Lóbulos y motas en reposo (apagar en tamaños mínimos). |
+| `playful` | `boolean` | `false` | Juegos: marearlo dando vueltas con el cursor y cosquillas al pulsarlo. |
+| `pull` | `number` | `0` | Estiramiento vertical externo (0–1), por ejemplo el del scroll. |
+| `animateSize` | `boolean` | `false` | Cambios de `size` con transición. |
+| `intensity` | `number` | `1` | Amplitud de los gestos (0–1.5). |
 | `paused` | `boolean` | `false` | Congela la animación. |
 | `reducedMotion` | `'auto' \| 'reduce' \| 'no-preference'` | `'auto'` | `auto` respeta `prefers-reduced-motion`. |
 | `surface` | `'auto' \| 'light' \| 'dark'` | `'auto'` | Fondo sobre el que se dibuja; `auto` sigue `.dark` en `<html>`. |
@@ -98,64 +176,92 @@ async function guardar() {
 
 ## Estados
 
-| Estado | Clave | Tipo | Cómo se distingue |
-| --- | --- | --- | --- |
-| Reposo | `idle` | persistente | Casi circular, respiración de 4,2 s (±1,1 %), parpadeo cada 2,6–6 s, miradas breves. |
-| Atento | `attentive` | persistente | Los ojos van primero hacia la interacción; la masa se inclina después siguiendo a los ojos. |
-| Curioso | `curious` | persistente | Protuberancia lateral y cuerpo estirado hacia la mirada; ojo cercano mayor; pequeños «asomos» periódicos. |
-| Pensando | `thinking` | persistente | Ondulación lenta que recorre el contorno; mirada hacia arriba que deriva. |
-| Trabajando | `working` | persistente | Pulso regular (1,05 s) de compresión y brillo interior; ojos entrecerrados, juntos y quietos. Se mantiene hasta que llega un resultado. |
-| Duda | `doubt` | persistente | Mira arriba y luego inclina la masa; un ojo entrecerrado; leve tono azul grisáceo. |
-| Error recuperable | `error` | persistente | Sobresalto contenido, retroceso suave inclinándose hacia atrás, base asentada, ojos abiertos hacia el mensaje, tono azul grisáceo. |
-| Esperando | `waiting` | persistente | Se asienta (base plana, más ancho), ojos relajados mirando al usuario; mira a un lado cada 8–13 s, sin insistir. |
-| Bienvenida | `welcome` | reacción | Se comprime, asciende con una gota que se separa, se balancea con ojos alegres y se asienta. |
-| Alegre / éxito | `success` | reacción | Anticipación con ojos apretados, salto elástico, ojos en arco, dos gotas y aterrizaje gelatinoso. |
-| Sorprendido | `surprised` | reacción | Estiramiento vertical breve con ojos más grandes y recuperación rápida. |
+| Estado | Clave | Cómo se distingue |
+| --- | --- | --- |
+| Reposo | `idle` | Flota y respira; cada ~15 s le salen un lóbulo grande abajo a la izquierda y otro pequeño al lado, y entre ciclos una gotita brota arriba, se suelta, flota y vuelve. Dos motas orbitan. |
+| Atento | `attentive` | Los ojos van primero; el cuerpo se inclina después. |
+| Curioso | `curious` | Se estira hacia donde mira y asoma un lóbulo. |
+| Pensando | `thinking` | Ondula; una gota sube como una idea y vuelve. |
+| Trabajando | `working` | Ojos cerrados, el contorno hierve y dos motas giran. Se mantiene hasta que llega un resultado. |
+| Cargando | `loading` | Se encoge y se divide en una fila de gotas que laten en onda. |
+| Duda | `doubt` | Inclinación lateral, un ojo entrecerrado, tono azul grisáceo. |
+| Error recuperable | `error` | Retrocede con suavidad y queda atento a la solución (sin tristeza ni culpa). |
+| Esperando | `waiting` | Se sienta sobre dos patitas y mira con calma. |
+| Contento | `content` | Ojos «◡◡», rubor y lóbulos que se mecen. |
+| Escuchando música | `music` | Se balancea y se desplaza al ritmo; le salen notas en ráfagas. |
+| Dormido | `sleeping` | Respira hondo, se asienta y suelta zetas. |
+| Tímido | `shy` | Se encoge, se sonroja, pone las manitas junto a las mejillas y mira de reojo. |
+
+## Reacciones
+
+| Reacción | Clave | Qué hace |
+| --- | --- | --- |
+| Bienvenida | `welcome` | Le crece un brazo que se suelta como manita, saluda y guiña con rubor. |
+| Alegre / éxito | `success` | Anticipación, salto elástico, manitas que se agitan y destellos. |
+| Sorprendido | `surprised` | Estiramiento, ojos muy abiertos y dos gotitas que saltan. |
+| Baile | `dance` | Brazos que giran con el balanceo y se desplaza. |
+| Encantado | `love` | Ojos de corazón, rubor y corazones. |
+| Cosquillas | `giggle` | Se sacude de risa. También al pulsarlo (con `playful`). |
+| ¡Idea! | `idea` | Una gota salta por arriba y vuelve como antena. |
+| Mareado | `dizzy` | Ojos de espiral, tambaleo y estrellas en órbita. |
+| Explorar | `explore` | Viaja a un lado con una gota rezagada y vuelve. |
+| Bostezo | `yawn` | Se estira hacia arriba con la boca muy abierta. |
+| Rebote | `boing` | Aplastamiento y estiramiento rápido (también al cambiar de tamaño). |
 
 Reglas de transición:
 
-- Cada canal (forma, mirada, ojos) persigue su objetivo con un muelle
-  amortiguado: los cambios y las interrupciones nunca saltan.
+- Los cambios y las interrupciones nunca saltan: todo canal y todo satélite va
+  con muelle, y lo que un estado deja de usar se reabsorbe.
 - Los gestos programados viven en el reloj del motor (no hay `setTimeout`
   compitiendo) y se pausan con la animación.
 - Un gesto nuevo corta el anterior; un cambio de estado distinto también. Pedir
   el estado al que el gesto ya iba a volver no lo corta.
-- El área se normaliza en cada fotograma (100 % en reposo y en los gestos;
-  96 % en el pulso de trabajo).
+- KAI nunca anuncia una acción que no ocurrió: `track` solo celebra cuando la
+  promesa real se resuelve.
+
+## Juegos
+
+- **Marearlo**: con `playful`, si el cursor da unas dos vueltas y media
+  seguidas alrededor de KAI (dentro de una zona cercana), se marea unos
+  segundos. Después descansa 5 s antes de poder marearse otra vez. El listener
+  es pasivo y solo existe mientras KAI es visible.
+- **Cosquillas**: un clic o toque lo hace reír.
 
 ## Accesibilidad y rendimiento
 
 - Con `prefers-reduced-motion` (o `reducedMotion="reduce"`): sin saltos,
-  desplazamientos, gotas ni capas oscilantes; los estados se leen por los ojos y
-  una inclinación estática, y el bucle se detiene por completo cuando no hay
-  cambios.
+  desplazamientos, gotas, satélites ni partículas; los estados se leen por los
+  ojos, el rubor y una inclinación estática, y el bucle se detiene por completo
+  cuando no hay cambios. El estiramiento del scroll también se desactiva.
 - El personaje es decorativo por defecto (`aria-hidden`) y no tiene regiones
-  `aria-live`. Los mensajes importantes (error, confirmación) deben ir en texto
-  de la interfaz, como en la demostración contextual (`role="status"`).
+  `aria-live`. Los mensajes importantes deben ir en texto de la interfaz, como
+  en la demostración contextual (`role="status"`). Los botones del compañero
+  flotante tienen nombre accesible y se ven con el foco del teclado.
 - La animación se detiene fuera de la vista (IntersectionObserver), con la
   pestaña oculta y en pausa. Todas las instancias comparten un único
-  `requestAnimationFrame`, que se cancela cuando no queda ninguna activa.
-- La mirada solo sigue al puntero dentro del propio componente (o del escenario
-  del laboratorio); en pantallas táctiles mira el punto tocado y vuelve.
+  `requestAnimationFrame`; con más de cuatro activas, las pequeñas van a 30 fps.
+- Coste medido en Chromium: ~0,6 ms por fotograma en reposo a 300 px, ~0,25 ms
+  a 112 px; la galería del laboratorio (25 instancias) se mantiene en ~56–60 fps.
 
 ## Limitaciones y ajustes pendientes
 
-- **Referencia de movimiento.** El GIF de Interflow no llegó como animación: se
-  recibió una cuadrícula estática de 9 fotogramas (WebP sin animación) en la
-  que solo se aprecia un reposo casi inmóvil (área ±1 %, contorno ±2 px). El
-  sistema de movimiento se basa en la descripción del encargo, no en
-  movimientos observados en ese archivo.
-- **Materialidad.** La translucidez se aproxima con degradados y un único
-  desenfoque recortado al contorno; no hay refracción ni cáusticas reales como
-  en el render de referencia. El centro cian de la propuesta se trasladó a
-  azules de la paleta.
-- **Tamaños pequeños.** Por debajo de ~48 px las asimetrías (curioso, duda) se
-  leen poco; en ese tamaño conviene apoyarse en el texto de la interfaz.
-- **Gotas.** El puente se calcula como un metaball anclado al contorno; en el
-  instante de separación puede verse una cuña breve (1–2 fotogramas).
-- **Por ajustar con diseño:** diferencia entre «duda» y «curioso» en tamaño
-  medio, apertura de ojos en «trabajando», duración de la bienvenida y
-  presencia de las gotas en el éxito.
+- **Enfado.** El video muestra un estado rojo y enfadado; no se implementa
+  porque el encargo original excluye enfado, culpa y tristeza exagerada.
+- **Colores.** Se mantienen los azules de Kiub y se añade un tercer color
+  (violeta) para el degradado. El magenta y cian intensos del video están
+  disponibles como inspiración en los preajustes «Aurora» y «Cielo»; el
+  original se recupera con «Reiniciar color original».
+- **Materialidad.** La translucidez se aproxima con degradados, manchas
+  desenfocadas y brillos; no hay refracción ni cáusticas reales como en el
+  render de referencia.
+- **Tamaños pequeños.** Por debajo de ~64 px las gotas diminutas se dibujan
+  como puntos y las asimetrías se leen poco; en el tamaño mínimo del compañero
+  se apagan los lóbulos de ambiente.
+- **Estiramiento.** Responde a la rueda del ratón, al trackpad y al gesto
+  táctil al final de la página. Arrastrar la barra de desplazamiento o pulsar
+  `Fin` no lo activa.
+- **Integración.** El compañero flotante solo se monta en el laboratorio.
+  Para la intranet basta con añadir `<KaiDock>` una vez en el layout principal.
 - **Validación.** Probado en Chromium (escritorio y móvil emulado) sobre el
   starter kit oficial de Laravel + Inertia v3 + Vue con `AppHeader.vue`, porque
   este repositorio es un extracto. Falta comprobarlo en Safari y Firefox y en el

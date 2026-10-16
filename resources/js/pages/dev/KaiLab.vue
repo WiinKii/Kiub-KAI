@@ -5,13 +5,25 @@
  */
 import { Head } from '@inertiajs/vue3';
 import { useMediaQuery, usePreferredReducedMotion } from '@vueuse/core';
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import {
+    computed,
+    onBeforeUnmount,
+    onMounted,
+    reactive,
+    ref,
+    watch,
+} from 'vue';
 import KaiCharacter from '@/components/kai/KaiCharacter.vue';
+import KaiDock from '@/components/kai/KaiDock.vue';
 import KaiHelpDemo from '@/components/kai/lab/KaiHelpDemo.vue';
 import KaiLabControls from '@/components/kai/lab/KaiLabControls.vue';
 import KaiLabGallery from '@/components/kai/lab/KaiLabGallery.vue';
 import KaiLabSizes from '@/components/kai/lab/KaiLabSizes.vue';
-import { DEFAULT_SETTINGS } from '@/components/kai/lab/settings';
+import {
+    DEFAULT_SETTINGS,
+    loadLabColors,
+    saveLabColors,
+} from '@/components/kai/lab/settings';
 import type { LabSettings } from '@/components/kai/lab/settings';
 import {
     SEQUENCES,
@@ -31,6 +43,8 @@ defineOptions({
 
 const settings = reactive<LabSettings>({ ...DEFAULT_SETTINGS });
 const state = ref<KaiState>('idle');
+const dockState = ref<KaiState>('idle');
+const labRoot = ref<HTMLElement | null>(null);
 const reaction = ref<KaiReaction | null>(null);
 const kai = ref<InstanceType<typeof KaiCharacter> | null>(null);
 const sizes = ref<InstanceType<typeof KaiLabSizes> | null>(null);
@@ -53,6 +67,11 @@ function updateSettings(patch: Partial<LabSettings>) {
         kai.value?.lookAt(null);
     }
 }
+
+watch(
+    () => settings.colors,
+    (colors) => saveLabColors(colors),
+);
 
 /* ── Acciones manuales: detienen cualquier secuencia en curso ──────── */
 function setState(next: KaiState) {
@@ -160,6 +179,8 @@ const areaLabel = computed(() => percent.format(diagnostics.value.area));
 let poll: number | undefined;
 
 onMounted(() => {
+    settings.colors = loadLabColors();
+
     // El escenario empieza con el fondo del tema; luego se cambia a mano.
     if (document.documentElement.classList.contains('dark')) {
         settings.surface = 'dark';
@@ -184,7 +205,7 @@ onBeforeUnmount(() => {
 <template>
     <Head title="Laboratorio KAI" />
 
-    <div class="kl">
+    <div ref="labRoot" class="kl">
         <header class="kl-header">
             <div>
                 <p class="kl-badge">
@@ -235,12 +256,17 @@ onBeforeUnmount(() => {
                         v-model:state="state"
                         data-main
                         class="kl-hero"
-                        :size="compact ? 200 : 260"
+                        :size="compact ? 220 : 300"
+                        :playful="settings.playful"
                         :surface="settings.surface"
                         :paused="settings.paused"
                         :reduced-motion="settings.motion"
                         :intensity="settings.intensity"
                         :time-scale="settings.timeScale"
+                        :colors="settings.colors"
+                        :mouth="settings.mouth"
+                        :blush="settings.blush"
+                        :ambient="settings.ambient"
                         :debug="settings.debug"
                         @state-change="onStateChange"
                         @reaction-start="onReactionStart"
@@ -333,6 +359,21 @@ await kai.value.react('success', { next: 'idle' });
 await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pre>
         </section>
     </div>
+    <Teleport to="body">
+        <KaiDock
+            v-if="settings.dock"
+            v-model:state="dockState"
+            v-model:size="settings.dockSize"
+            data-dock
+            :colors="settings.colors"
+            :mouth="settings.mouth"
+            :intensity="settings.intensity"
+            :paused="settings.paused"
+            :reduced-motion="settings.motion"
+            :overscroll="settings.overscroll"
+            :stretch-target="() => labRoot"
+        />
+    </Teleport>
 </template>
 
 <style scoped>
@@ -566,9 +607,13 @@ await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pr
     color: var(--kl-ink-3);
 }
 
+/* Fijo junto al escenario y con su propio scroll: KAI siempre a la vista. */
 .kl-panel {
     position: sticky;
     top: 96px;
+    max-height: calc(100vh - 112px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 22px;
     border: 1px solid var(--kl-line);
     border-radius: 24px;
@@ -599,6 +644,8 @@ await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pr
 
     .kl-panel {
         position: static;
+        max-height: none;
+        overflow: visible;
     }
 }
 

@@ -183,6 +183,10 @@ onBeforeUnmount(() => window.clearTimeout(simulation));
                         :reduced-motion="settings.motion"
                         :intensity="settings.intensity"
                         :time-scale="settings.timeScale"
+                        :colors="settings.colors"
+                        :mouth="settings.mouth"
+                        :blush="settings.blush"
+                        :ambient="settings.ambient"
                     />
                     <span class="khd-help-text">Ayuda</span>
                 </button>

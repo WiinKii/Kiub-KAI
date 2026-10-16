@@ -6,17 +6,35 @@
  * temporales: terminan solas y devuelven a KAI al estado vigente.
  */
 
+export type { KaiColors } from './palette';
+
 export type KaiState =
     | 'idle'
     | 'attentive'
     | 'curious'
     | 'thinking'
     | 'working'
+    | 'loading'
     | 'doubt'
     | 'error'
-    | 'waiting';
+    | 'waiting'
+    | 'content'
+    | 'music'
+    | 'sleeping'
+    | 'shy';
 
-export type KaiReaction = 'welcome' | 'success' | 'surprised';
+export type KaiReaction =
+    | 'welcome'
+    | 'success'
+    | 'surprised'
+    | 'dance'
+    | 'love'
+    | 'giggle'
+    | 'idea'
+    | 'dizzy'
+    | 'explore'
+    | 'yawn'
+    | 'boing';
 
 /** Dirección de la mirada; cada eje va de -1 a 1 (y positivo hacia abajo). */
 export type KaiGaze = { x: number; y: number };
@@ -67,3 +85,6 @@ export type KaiController = {
     pause: () => void;
     resume: () => void;
 };
+
+/** Tamaños del KAI flotante. */
+export type KaiDockSize = 'mini' | 'normal' | 'grande';

@@ -101,6 +101,10 @@ onBeforeUnmount(() => {
                     :reduced-motion="settings.motion"
                     :intensity="settings.intensity"
                     :time-scale="settings.timeScale"
+                    :colors="settings.colors"
+                    :mouth="settings.mouth"
+                    :blush="settings.blush"
+                    :ambient="settings.ambient"
                     :debug="settings.debug"
                 />
                 <strong class="klg-name">{{ STATE_CATALOG[key].label }}</strong>
@@ -121,6 +125,10 @@ onBeforeUnmount(() => {
                     :reduced-motion="settings.motion"
                     :intensity="settings.intensity"
                     :time-scale="settings.timeScale"
+                    :colors="settings.colors"
+                    :mouth="settings.mouth"
+                    :blush="settings.blush"
+                    :ambient="settings.ambient"
                     :debug="settings.debug"
                     @reaction-end="onReactionEnd(key, $event)"
                 />

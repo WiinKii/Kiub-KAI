@@ -68,6 +68,10 @@ defineExpose({ react, blink });
                         :reduced-motion="settings.motion"
                         :intensity="settings.intensity"
                         :time-scale="settings.timeScale"
+                        :colors="settings.colors"
+                        :mouth="settings.mouth"
+                        :blush="settings.blush"
+                        :ambient="settings.ambient"
                         :debug="settings.debug"
                     />
                     <figcaption>{{ size.label }} · {{ size.px }} px</figcaption>
