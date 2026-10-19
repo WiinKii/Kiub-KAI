@@ -65,10 +65,30 @@ export type KaiTrackOptions = {
     failure?: KaiState;
 };
 
+/**
+ * Fases de la aparición «Convergencia». `gentle` es la variante de
+ * movimiento reducido (aparece y abre los ojos, sin trayectorias).
+ */
+export type KaiEmergePhase =
+    | 'pulse'
+    | 'attraction'
+    | 'fusion'
+    | 'awakening'
+    | 'recognition'
+    | 'gentle';
+
+export type KaiEmergeResult = {
+    /** `true` si se canceló o se reinició antes de terminar. */
+    cancelled: boolean;
+};
+
 export type KaiEngineEvents = {
     stateChange: { from: KaiState; to: KaiState };
     reactionStart: { name: KaiReaction };
     reactionEnd: KaiReactionResult;
+    emergeStart: { reduced: boolean };
+    emergePhase: { phase: KaiEmergePhase };
+    emergeEnd: KaiEmergeResult;
 };
 
 /** API que expone `<KaiCharacter>` mediante su ref. */
@@ -88,6 +108,15 @@ export type KaiController = {
     nudge: (vx: number, vy: number) => void;
     /** Señala con una manita hacia una dirección (pantalla); `null` la recoge. */
     point: (dir: KaiGaze | null) => void;
+    /**
+     * Aparición «Convergencia»: KAI se forma con gotas que se funden y
+     * despierta. Llamarla de nuevo reinicia; se resuelve al terminar o al
+     * cancelarse. Las peticiones de estado y gesto durante la aparición se
+     * guardan (la última de cada tipo) y se aplican al terminar.
+     */
+    emerge: () => Promise<KaiEmergeResult>;
+    /** Termina la aparición ya, desde la pose actual, y aplica lo pendiente. */
+    cancelEmerge: () => void;
     pause: () => void;
     resume: () => void;
 };

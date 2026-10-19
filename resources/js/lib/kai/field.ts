@@ -8,8 +8,20 @@
  * B-spline cuadrática.
  */
 
-/** `k`: exponente propio (más alto = gota más «sólida», se funde menos). */
-export type Ball = { x: number; y: number; r: number; k?: number };
+/**
+ * `k`: exponente propio (más alto = gota más «sólida», se funde menos).
+ * `stretch`: gota alargada (elipse de área constante) a lo largo de la
+ * dirección (`c`, `s`) = (cos, sin); así se estira hacia donde va.
+ */
+export type Ball = {
+    x: number;
+    y: number;
+    r: number;
+    k?: number;
+    stretch?: number;
+    c?: number;
+    s?: number;
+};
 
 export type BodyField = {
     cx: number;
@@ -235,7 +247,17 @@ export function traceField(
                 const ball = balls[k];
                 const ex = x - ball.x;
                 const ey = y - ball.y;
-                const q = (ball.r * ball.r) / (ex * ex + ey * ey + 1e-6);
+                let d2 = ex * ex + ey * ey;
+
+                if (ball.stretch) {
+                    // En los ejes de la gota: larga en `u`, estrecha en `v`.
+                    const a = ball.stretch;
+                    const u = ex * (ball.c ?? 1) + ey * (ball.s ?? 0);
+                    const v = ey * (ball.c ?? 1) - ex * (ball.s ?? 0);
+                    d2 = (u * u) / (a * a) + v * v * a * a;
+                }
+
+                const q = (ball.r * ball.r) / (d2 + 1e-6);
 
                 // Lejos de la gota su aporte es despreciable (< 0,03 %).
                 if (q > 0.004) {

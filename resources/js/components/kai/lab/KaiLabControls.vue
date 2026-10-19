@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useId } from 'vue';
 import {
+    EMERGE_PHASE_LABELS,
+    EMERGE_STEPS,
     KAI_REACTIONS,
     REACTION_CATALOG,
     STATE_CATALOG,
@@ -10,6 +12,7 @@ import { KAI_DEFAULT_COLORS, KAI_PRESETS, isHexColor } from '@/lib/kai/palette';
 import type { KaiColors } from '@/lib/kai/palette';
 import type {
     KaiDockSize,
+    KaiEmergePhase,
     KaiReaction,
     KaiReducedMotion,
     KaiState,
@@ -24,6 +27,8 @@ const props = defineProps<{
     sequence: string | null;
     caption: string;
     progress: { index: number; total: number };
+    /** Fase de la aparición del protagonista, o null. */
+    emergePhase: KaiEmergePhase | null;
 }>();
 
 const emit = defineEmits<{
@@ -33,7 +38,22 @@ const emit = defineEmits<{
     runSequence: [id: string];
     stopSequence: [];
     update: [patch: Partial<LabSettings>];
+    emerge: [mode: 'play' | 'restart'];
 }>();
+
+/** Estado de cada paso del indicador: hecho, en curso o pendiente. */
+function stepState(step: KaiEmergePhase): 'done' | 'active' | 'pending' {
+    const current = props.emergePhase;
+
+    if (!current || current === 'gentle') {
+        return 'pending';
+    }
+
+    const at = EMERGE_STEPS.indexOf(current);
+    const index = EMERGE_STEPS.indexOf(step);
+
+    return index < at ? 'done' : index === at ? 'active' : 'pending';
+}
 
 const uid = useId();
 
@@ -83,6 +103,67 @@ function isDefaultColors(): boolean {
 
 <template>
     <div class="klc">
+        <section
+            class="klc-group"
+            :aria-labelledby="`${uid}-emerge`"
+            data-emerge-section
+        >
+            <h2 :id="`${uid}-emerge`" class="klc-title">Aparición</h2>
+            <p class="klc-hint">
+                «Convergencia: KAI cobra vida». Solo en el protagonista; usa la
+                pausa, la velocidad, la intensidad, el fondo y el movimiento de
+                este panel.
+            </p>
+            <div class="klc-grid">
+                <button
+                    type="button"
+                    class="klc-chip"
+                    data-emerge-play
+                    :disabled="emergePhase !== null"
+                    @click="emit('emerge', 'play')"
+                >
+                    {{
+                        emergePhase ? 'Reproduciendo…' : 'Reproducir aparición'
+                    }}
+                </button>
+                <button
+                    type="button"
+                    class="klc-chip"
+                    data-emerge-restart
+                    @click="emit('emerge', 'restart')"
+                >
+                    Reiniciar
+                </button>
+            </div>
+            <ol class="klc-phases" aria-hidden="true">
+                <li
+                    v-for="step in EMERGE_STEPS"
+                    :key="step"
+                    :data-step="stepState(step)"
+                >
+                    {{ EMERGE_PHASE_LABELS[step] }}
+                </li>
+            </ol>
+            <p class="klc-progress" role="status" data-emerge-phase>
+                {{
+                    emergePhase
+                        ? `Fase: ${EMERGE_PHASE_LABELS[emergePhase]}`
+                        : 'Sin reproducir'
+                }}
+            </p>
+            <label class="klc-check">
+                <input
+                    type="checkbox"
+                    data-emerge-slow
+                    :checked="settings.emergeSlow"
+                    @change="
+                        emit('update', { emergeSlow: !settings.emergeSlow })
+                    "
+                />
+                <span>Reproducción lenta (×0,25) para revisar la fusión</span>
+            </label>
+        </section>
+
         <section class="klc-group" :aria-labelledby="`${uid}-states`">
             <h2 :id="`${uid}-states`" class="klc-title">
                 Estados persistentes
@@ -577,6 +658,40 @@ function isDefaultColors(): boolean {
 .klc-color:focus-within {
     outline: 3px solid var(--kl-focus);
     outline-offset: 2px;
+}
+
+.klc-phases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.klc-phases li {
+    position: relative;
+    flex: 1 1 auto;
+    padding: 4px 8px 4px 8px;
+    border-radius: 999px;
+    background: var(--kl-surface-2);
+    color: var(--kl-ink-3);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-align: center;
+    transition:
+        background 0.25s,
+        color 0.25s;
+}
+
+.klc-phases li[data-step='done'] {
+    background: rgba(92, 157, 255, 0.16);
+    color: var(--kl-blue-text);
+}
+
+.klc-phases li[data-step='active'] {
+    background: var(--kl-blue);
+    color: #ffffff;
 }
 
 .klc-progress {

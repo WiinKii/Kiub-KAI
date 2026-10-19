@@ -7,6 +7,14 @@
  * deja temporizadores compitiendo.
  */
 
+import {
+    EMERGE,
+    emergeFrame,
+    emergeReducedFrame,
+    emergeSprings,
+    nominalTime,
+} from './emerge';
+import type { EmergeContext, EmergeDrop } from './emerge';
 import { EYE, FACE_RADIUS, eyeStroke, mouthPath } from './face';
 import { BINS, radiiFromContour, traceField } from './field';
 import type { Ball } from './field';
@@ -43,6 +51,8 @@ import type { EmitOptions, Sprite, SpriteKind } from './sprites';
 import { REACTIONS, STATES } from './states';
 import type { Cue, Rig, RigContext, StateBehavior } from './states';
 import type {
+    KaiEmergePhase,
+    KaiEmergeResult,
     KaiEngineEvents,
     KaiGaze,
     KaiReactOptions,
@@ -112,6 +122,10 @@ export type KaiFrame = {
     };
     /** Punto arriba a la derecha del cuerpo para el globito de avisos. */
     badge: Vec;
+    /** Visibilidad global (la aparición empieza en 0). */
+    presence: number;
+    /** Radio del degradado base: acompaña al volumen visible. */
+    baseR: number;
     sprites: SpriteFrame[];
     face: number;
     cool: number;
@@ -139,7 +153,36 @@ type Sat = {
     spring: SpringConfig;
     /** Caída propia en el campo (más alta = cuello más marcado). */
     falloff?: number;
+    /** Colocado por la aparición en este fotograma (sin muelle). */
+    pinned: boolean;
+    /** Alargamiento con área constante a lo largo de `angle`. */
+    stretch: number;
+    angle: number;
+    /** Brillo de esfera propia (0 = integrado, sin borde interno). */
+    glass: number;
 };
+
+type PendingReaction = {
+    name: KaiReaction;
+    options: KaiReactOptions;
+    resolve: (result: KaiReactionResult) => void;
+};
+
+/** Aparición en curso. */
+type Emergence = {
+    start: number;
+    reduced: boolean;
+    phase: KaiEmergePhase | null;
+    /** Ondas, empujones y parpadeos ya lanzados (una vez cada uno). */
+    fired: Set<string>;
+    resolve: (result: KaiEmergeResult) => void;
+    /** Última petición de estado y de gesto: se aplican al terminar. */
+    pendingState: KaiState | null;
+    pendingReaction: PendingReaction | null;
+};
+
+/** Onda que recorre el contorno desde un impacto. */
+type Wave = { angle: number; born: number; amp: number };
 
 type ActiveReaction = {
     name: KaiReaction;
@@ -255,6 +298,16 @@ export class KaiEngine {
     private grabPoint: KaiGaze | null = null;
     /** Dirección a la que señala con una manita, o null. */
     private pointDir: KaiGaze | null = null;
+    /** Aparición en curso, o null. */
+    private emergence: Emergence | null = null;
+    /** Volumen del cuerpo (radio relativo): la aparición lo va llenando. */
+    private mass = 1;
+    /** Corrección de volumen de la aparición (1 = ninguna). */
+    private massCorr = 1;
+    /** Área trazada del último fotograma, como fracción del reposo. */
+    private lastArea = 1;
+    private presence = 1;
+    private waves: Wave[] = [];
     private intensity = 1;
     private intensityNow = 1;
     private sizeFactor = 1;
@@ -278,8 +331,12 @@ export class KaiEngine {
         stateChange: new Set(),
         reactionStart: new Set(),
         reactionEnd: new Set(),
+        emergeStart: new Set(),
+        emergePhase: new Set(),
+        emergeEnd: new Set(),
     };
     private rigContext: RigContext;
+    private emergeContext: EmergeContext;
 
     constructor({
         state = 'idle',
@@ -305,6 +362,10 @@ export class KaiEngine {
             ty: 0,
             tr: 0,
             spring: SAT_DEFAULT,
+            pinned: false,
+            stretch: 1,
+            angle: 0,
+            glass: 1,
         }));
 
         const blob = (): Blob => ({ cx: 0, cy: 0, rx: 0, ry: 0, opacity: 0 });
@@ -342,6 +403,8 @@ export class KaiEngine {
                 width: 1,
             },
             badge: { x: 0, y: 0 },
+            presence: 1,
+            baseR: R * 1.25,
             sprites: Array.from({ length: MAX_SPRITES }, () => ({
                 visible: false,
                 kind: 'dot' as SpriteKind,
@@ -356,6 +419,7 @@ export class KaiEngine {
         };
 
         this.rigContext = this.createRigContext();
+        this.emergeContext = this.createEmergeContext();
         this.enterState(false);
         this.snap();
         this.compose();
@@ -369,6 +433,11 @@ export class KaiEngine {
 
     get activeReaction(): KaiReaction | null {
         return this.reaction?.name ?? null;
+    }
+
+    /** Fase de la aparición en curso, o null si no hay ninguna. */
+    get emergePhase(): KaiEmergePhase | null {
+        return this.emergence?.phase ?? null;
     }
 
     on<K extends keyof KaiEngineEvents>(
@@ -386,6 +455,13 @@ export class KaiEngine {
      * gesto en curso: el estado refleja la interacción real y tiene prioridad.
      */
     setState(next: KaiState, { interrupt = true } = {}): void {
+        // Durante la aparición no compite por el contorno: se guarda.
+        if (this.emergence) {
+            this.emergence.pendingState = next;
+
+            return;
+        }
+
         // Pedir el estado al que el gesto ya iba a volver no lo corta.
         const destination = this.reaction?.next ?? this.stateName;
 
@@ -418,6 +494,21 @@ export class KaiEngine {
         name: KaiReaction,
         options: KaiReactOptions = {},
     ): Promise<KaiReactionResult> {
+        // Durante la aparición se guarda la última petición y se ejecuta al
+        // terminar; la que queda sustituida se resuelve como cortada.
+        if (this.emergence) {
+            const run = this.emergence;
+            const replaced = run.pendingReaction;
+
+            if (replaced) {
+                replaced.resolve({ name: replaced.name, interrupted: true });
+            }
+
+            return new Promise((resolve) => {
+                run.pendingReaction = { name, options, resolve };
+            });
+        }
+
         if (this.reaction) {
             this.endReaction(true);
         }
@@ -477,7 +568,8 @@ export class KaiEngine {
      * el fluido chapotea hacia él y el cuerpo se tambalea. Se apaga sola.
      */
     setSpin(charge: number, angle: number): void {
-        this.spinCharge = this.reduced ? 0 : clamp(charge, 0, 1);
+        this.spinCharge =
+            this.reduced || this.emergence ? 0 : clamp(charge, 0, 1);
         this.spinAngle = angle;
     }
 
@@ -487,6 +579,12 @@ export class KaiEngine {
      * soltar, la masa corre hacia allí y vuelve con rebote.
      */
     grab(point: KaiGaze | null): void {
+        if (this.emergence) {
+            this.grabPoint = null;
+
+            return;
+        }
+
         if (this.reduced || !point) {
             if (this.grabPoint && !this.reduced) {
                 const { x, y } = this.grabPoint;
@@ -514,6 +612,102 @@ export class KaiEngine {
 
         const d = Math.hypot(dir.x, dir.y) || 1;
         this.pointDir = { x: dir.x / d, y: dir.y / d };
+    }
+
+    /**
+     * Aparición «Convergencia: KAI cobra vida».
+     *
+     * - Inicio: el escenario se vacía al instante (sin cuerpo ni ojos) y
+     *   empieza la coreografía en el reloj del motor (pausa y velocidad
+     *   incluidas). Corta cualquier gesto en curso.
+     * - Durante: la aparición es dueña del contorno. `setState` y `react` no
+     *   interrumpen: se guarda la última petición de cada tipo.
+     * - Finalización: a los `EMERGE.duration` s la pose ya es la de reposo;
+     *   el motor habitual continúa desde ella, sin salto. Luego se aplican el
+     *   estado y el gesto pendientes.
+     * - Reinicio: volver a llamarla cancela la anterior (sin aplicar lo
+     *   pendiente) y empieza una sola secuencia limpia.
+     * - Cancelación: `cancelEmerge()` entrega el control desde la pose actual;
+     *   las gotas que queden se funden con muelle y se aplica lo pendiente.
+     */
+    emerge(): Promise<KaiEmergeResult> {
+        if (this.emergence) {
+            this.endEmergence(true, false);
+        }
+
+        if (this.reaction) {
+            this.endReaction(true);
+        }
+
+        this.cues = [];
+        this.blinkStart = -1;
+        this.saccade = { x: 0, y: 0 };
+        this.grabPoint = null;
+        this.pointDir = null;
+        this.spinCharge = 0;
+        this.jelly = { x: 0, y: 0, vx: 0, vy: 0 };
+        this.waves = [];
+
+        for (const s of this.sprites) {
+            s.active = false;
+        }
+
+        for (const sat of this.sats) {
+            Object.assign(sat, {
+                active: false,
+                wanted: false,
+                pinned: false,
+                stretch: 1,
+                glass: 1,
+            });
+        }
+
+        for (const ch of CHANNELS) {
+            if (ch !== 'pull') {
+                this.target[ch] = NEUTRAL[ch];
+                this.spring[ch] = CHANNEL_SPRING[ch];
+            }
+        }
+
+        if (!this.reduced) {
+            Object.assign(this.spring, emergeSprings());
+        }
+
+        this.mass = this.reduced ? 1 : 0;
+        this.massCorr = 1;
+        this.presence = 0;
+
+        return new Promise((resolve) => {
+            this.emergence = {
+                start: this.time,
+                reduced: this.reduced,
+                phase: null,
+                fired: new Set(),
+                resolve,
+                pendingState: null,
+                pendingReaction: null,
+            };
+            this.emit('emergeStart', { reduced: this.reduced });
+
+            // Pose inicial sin transición: el escenario empieza vacío.
+            this.runRig();
+            this.computeEffectiveTargets();
+            Object.assign(this.value, this.effective);
+
+            for (const ch of CHANNELS) {
+                this.velocity[ch] = 0;
+            }
+
+            this.acc = 0;
+            this.compose();
+        });
+    }
+
+    /** Termina la aparición ya: el motor sigue desde la pose actual. */
+    cancelEmerge(): void {
+        if (this.emergence) {
+            this.endEmergence(true, true);
+        }
     }
 
     /**
@@ -573,6 +767,11 @@ export class KaiEngine {
             return;
         }
 
+        // Cambiar de modo a mitad de la aparición la completa desde aquí.
+        if (this.emergence) {
+            this.endEmergence(true, true);
+        }
+
         this.reduced = value;
         this.blinkStart = -1;
         this.saccade = { x: 0, y: 0 };
@@ -591,7 +790,12 @@ export class KaiEngine {
 
     /** En movimiento reducido el motor se detiene cuando todo está quieto. */
     isSettled(): boolean {
-        if (!this.reduced || this.reaction || this.cues.length) {
+        if (
+            !this.reduced ||
+            this.reaction ||
+            this.emergence ||
+            this.cues.length
+        ) {
             return false;
         }
 
@@ -615,6 +819,10 @@ export class KaiEngine {
     }
 
     destroy(): void {
+        if (this.emergence) {
+            this.endEmergence(true, false);
+        }
+
         if (this.reaction) {
             this.endReaction(true);
         }
@@ -640,6 +848,27 @@ export class KaiEngine {
 
         if (this.reaction && this.time >= this.reaction.endAt) {
             this.finishReaction();
+        }
+
+        if (this.emergence) {
+            const run = this.emergence;
+            const length = run.reduced
+                ? EMERGE.reducedDuration
+                : EMERGE.duration;
+
+            if (this.time - run.start >= length) {
+                this.endEmergence(false, true);
+            }
+        }
+
+        if (!this.emergence) {
+            // Tras una cancelación, volumen y visibilidad vuelven sin saltos.
+            this.mass = 1 - (1 - this.mass) * Math.exp(-step * 5);
+            this.presence = 1 - (1 - this.presence) * Math.exp(-step * 8);
+        }
+
+        if (this.waves.length) {
+            this.waves = this.waves.filter((w) => this.time - w.born < 1.6);
         }
 
         this.spinCharge = Math.max(0, this.spinCharge - step * 0.4);
@@ -802,6 +1031,193 @@ export class KaiEngine {
             (spring as Partial<Record<Channel, SpringConfig>>)[ch] ??
             CHANNEL_SPRING[ch]
         );
+    }
+
+    /* ── Aparición ───────────────────────────────────────────────────── */
+
+    /**
+     * Relevo al motor habitual. `apply`: aplicar el estado y el gesto
+     * pedidos durante la aparición (no al reiniciar ni al destruir).
+     */
+    private endEmergence(cancelled: boolean, apply: boolean): void {
+        const run = this.emergence;
+
+        if (!run) {
+            return;
+        }
+
+        this.emergence = null;
+
+        // Las gotas que queden se sueltan: el motor las funde con muelle.
+        for (const sat of this.sats) {
+            sat.pinned = false;
+        }
+
+        // Objetivos del estado vigente desde la pose real. Al terminar ya
+        // coinciden con la pose final de la coreografía: no hay salto.
+        this.enterState(false);
+
+        // El reposo entra en la ventana tranquila de su ciclo: los lóbulos
+        // brotan después, despacio, en lugar de salir todos a la vez.
+        if (!cancelled && this.stateName === 'idle') {
+            this.stateStart -= EMERGE.idleOffset;
+        }
+
+        const { pendingState, pendingReaction } = run;
+        const result = { cancelled };
+        this.emit('emergeEnd', result);
+        run.resolve(result);
+
+        if (!apply) {
+            pendingReaction?.resolve({
+                name: pendingReaction.name,
+                interrupted: true,
+            });
+
+            return;
+        }
+
+        if (pendingState && pendingState !== this.stateName) {
+            this.setState(pendingState);
+        }
+
+        if (pendingReaction) {
+            void this.react(pendingReaction.name, pendingReaction.options).then(
+                pendingReaction.resolve,
+            );
+        }
+    }
+
+    private runEmergence(): void {
+        const run = this.emergence as Emergence;
+        const elapsed = this.time - run.start;
+        const ctx = this.emergeContext;
+        const center = this.visualCenter(this.tmp);
+        ctx.amp = this.intensityNow * this.sizeFactor;
+        ctx.body.x = center.x / R;
+        ctx.body.y = center.y / R;
+
+        const phase = run.reduced
+            ? emergeReducedFrame(elapsed, ctx)
+            : emergeFrame(nominalTime(elapsed), ctx);
+
+        if (phase !== run.phase) {
+            run.phase = phase;
+            this.emit('emergePhase', { phase });
+        }
+    }
+
+    /** `true` la primera vez que se pide `key` en esta aparición. */
+    private fire(key: string): boolean {
+        const run = this.emergence;
+
+        if (!run || run.fired.has(key)) {
+            return false;
+        }
+
+        run.fired.add(key);
+
+        return true;
+    }
+
+    private createEmergeContext(): EmergeContext {
+        return {
+            amp: 1,
+            body: { x: 0, y: 0 },
+            set: (ch, value) => {
+                this.overrides[ch] = value;
+            },
+            spring: (ch, config) => {
+                this.spring[ch] = config;
+            },
+            mass: (value) => {
+                this.mass = clamp(value * this.massCorr, 0, 1.3);
+            },
+            volume: (target, weight) => {
+                // Realimentación suave: si se ve más (o menos) líquido del que
+                // existe, el cuerpo cede (o recupera) radio poco a poco.
+                if (weight > 0 && target > 0.05 && this.lastArea > 0.02) {
+                    const ratio = target / this.lastArea;
+                    this.massCorr = clamp(
+                        this.massCorr * Math.pow(ratio, 0.25),
+                        0.75,
+                        1.3,
+                    );
+                }
+
+                this.massCorr = 1 + (this.massCorr - 1) * clamp(weight, 0, 1);
+            },
+            presence: (value) => {
+                this.presence = clamp(value, 0, 1);
+            },
+            drop: (slot, drop) => this.pinDrop(slot, drop),
+            wave: (id, angle, amp) => {
+                if (this.fire(`wave-${id}`) && amp > 0) {
+                    this.waves.push({ angle, born: this.time, amp });
+                }
+            },
+            nudge: (id, vx, vy) => {
+                if (this.fire(`nudge-${id}`)) {
+                    this.nudge(vx, vy);
+                }
+            },
+            blink: (id) => {
+                if (this.fire(`blink-${id}`) && !this.reduced) {
+                    this.blinkStart = this.time;
+                }
+            },
+        };
+    }
+
+    /**
+     * Gota de la aparición: posición exacta (sin muelle) en este fotograma.
+     * Guarda su velocidad para que, si se suelta, siga con inercia.
+     */
+    private pinDrop(slot: number, drop: EmergeDrop | null): void {
+        const sat = this.sats[slot];
+
+        if (!sat) {
+            return;
+        }
+
+        if (!drop) {
+            sat.active = false;
+
+            return;
+        }
+
+        const x = drop.x * R;
+        const y = drop.y * R;
+        // La corrección de volumen afecta a todo el líquido, no solo al cuerpo.
+        const r = drop.r * R * this.massCorr;
+        const h = Math.max(this.lastStep, 1e-3);
+
+        if (sat.active) {
+            sat.vx = (x - sat.x) / h;
+            sat.vy = (y - sat.y) / h;
+            sat.vr = (r - sat.r) / h;
+        } else {
+            sat.vx = 0;
+            sat.vy = 0;
+            sat.vr = 0;
+        }
+
+        Object.assign(sat, {
+            active: true,
+            wanted: true,
+            pinned: true,
+            x,
+            y,
+            r,
+            tx: x,
+            ty: y,
+            tr: r,
+            spring: ABSORB,
+            falloff: undefined,
+            stretch: drop.stretch,
+            angle: drop.angle,
+            glass: drop.glass,
+        });
     }
 
     /* ── Rigs: lóbulos, manos, gotas y partículas ───────────────────── */
@@ -967,6 +1383,14 @@ export class KaiEngine {
 
         for (const sat of this.sats) {
             sat.wanted = false;
+            sat.pinned = false;
+        }
+
+        // La aparición es dueña del contorno: ni estado ni gestos compiten.
+        if (this.emergence) {
+            this.runEmergence();
+
+            return;
         }
 
         if (this.reduced) {
@@ -1051,9 +1475,14 @@ export class KaiEngine {
         const c = this.visualCenter({ x: 0, y: 0 });
 
         for (const sat of this.sats) {
-            if (!sat.active) {
+            if (!sat.active || sat.pinned) {
                 continue;
             }
+
+            // Fuera de la aparición vuelve a ser una gota redonda de vidrio.
+            const relax = Math.min(1, dt * 8);
+            sat.stretch += (1 - sat.stretch) * relax;
+            sat.glass += (1 - sat.glass) * relax;
 
             if (!sat.wanted) {
                 // Sin uso: vuelve al cuerpo y se funde.
@@ -1108,7 +1537,7 @@ export class KaiEngine {
 
     private runBehavior(dt: number): void {
         const behavior = this.behavior;
-        const free = !this.reaction && !this.reduced;
+        const free = !this.reaction && !this.reduced && !this.emergence;
 
         this.breathPhase = (this.breathPhase + dt / behavior.breath) % 1;
         this.pulsePhase = (this.pulsePhase + dt / TIMING.workPeriod) % 1;
@@ -1199,7 +1628,7 @@ export class KaiEngine {
         const e = this.effective;
         Object.assign(e, this.target);
 
-        if (!this.reaction) {
+        if (!this.reaction && !this.emergence) {
             let gx = this.target.gx + this.saccade.x;
             let gy = this.target.gy + this.saccade.y;
 
@@ -1233,7 +1662,10 @@ export class KaiEngine {
 
         // Antes de marearse: el fluido chapotea hacia el cursor que gira y el
         // cuerpo se tambalea cada vez más (así se nota que «algo pasa»).
-        const spin = this.reaction || this.reduced ? 0 : this.spinCharge;
+        const spin =
+            this.reaction || this.reduced || this.emergence
+                ? 0
+                : this.spinCharge;
 
         if (spin > 0.01) {
             const a = this.spinAngle;
@@ -1369,12 +1801,20 @@ export class KaiEngine {
             bx: this.out('bx') + lagX,
             by: this.out('by') + lagY,
             flat: clamp(this.out('flat'), 0, 1.4),
-            scale: this.out('scale') - pulse * 0.018,
+            scale: (this.out('scale') - pulse * 0.018) * this.mass,
             wob: Math.max(0, this.reduced ? 0 : this.out('wob')),
             ripple: this.out('ripple'),
             boil: Math.max(0, this.out('boil')),
             pull: clamp(this.out('pull'), -0.6, 1.2),
             t: this.time,
+            waves: this.waves.length
+                ? this.waves.map((w) => ({
+                      // El contorno se calcula sin el giro del cuerpo.
+                      angle: w.angle - this.out('rot'),
+                      age: this.time - w.born,
+                      amp: w.amp,
+                  }))
+                : undefined,
         };
 
         computeLocalContour(shape, this.local);
@@ -1408,7 +1848,9 @@ export class KaiEngine {
         this.sats.forEach((sat, i) => {
             const out = f.sats[i];
             out.visible = sat.active && sat.r > 0.4;
-            out.dot = out.visible && sat.r < tiny;
+            // Las gotas de la aparición siempre son campo: al vaciarse se
+            // funden, nunca quedan como una gotita suelta junto al borde.
+            out.dot = out.visible && sat.r < tiny && !sat.pinned;
 
             if (!out.visible) {
                 return;
@@ -1434,23 +1876,29 @@ export class KaiEngine {
                 BINS;
             const edge = this.radii[bin];
             out.lens = n2(
-                clamp((Math.hypot(dx, dy) + sat.r * 0.3 - edge) / sat.r, 0, 1),
+                clamp((Math.hypot(dx, dy) + sat.r * 0.3 - edge) / sat.r, 0, 1) *
+                    sat.glass,
             );
 
+            const stretched = Math.abs(sat.stretch - 1) > 0.005;
             this.balls.push({
                 x: sat.x,
                 y: sat.y,
                 r: sat.r,
                 k: tight ? 6 : sat.falloff,
+                stretch: stretched ? sat.stretch : undefined,
+                c: Math.cos(sat.angle),
+                s: Math.sin(sat.angle),
             });
-            minX = Math.min(minX, sat.x - sat.r * 1.6);
-            maxX = Math.max(maxX, sat.x + sat.r * 1.6);
-            minY = Math.min(minY, sat.y - sat.r * 1.6);
-            maxY = Math.max(maxY, sat.y + sat.r * 1.6);
+            const span = sat.r * 1.6 * Math.max(1, sat.stretch);
+            minX = Math.min(minX, sat.x - span);
+            maxX = Math.max(maxX, sat.x + span);
+            minY = Math.min(minY, sat.y - span);
+            maxY = Math.max(maxY, sat.y + span);
         });
 
         const pad = this.cell * 2 + 2;
-        f.shape = traceField(
+        const traced = traceField(
             { cx: origin.x, cy: origin.y, radii: this.radii },
             this.balls,
             [
@@ -1460,10 +1908,17 @@ export class KaiEngine {
                 clamp(maxY + pad, -260, 260),
             ],
             { cell: this.cell, anchor: origin, decimals: this.decimals },
-        ).path;
+        );
+        f.shape = traced.path;
+        // Área del círculo de reposo trazado (el polígono base es un 99,5 %).
+        this.lastArea = traced.area / (Math.PI * R * R * 0.995);
 
         f.cx = n2(origin.x);
         f.cy = n2(origin.y);
+        f.presence = n2(this.presence);
+        // El degradado acompaña al volumen: una gota pequeña no es un recorte
+        // del cuerpo grande.
+        f.baseR = n2(R * 1.25 * clamp(this.mass, 0.3, 1));
 
         this.composeMaterial(origin, sx);
         // El globito va sobre el «hombro» derecho y viaja con la gelatina.
@@ -1482,7 +1937,7 @@ export class KaiEngine {
     private composeMaterial(o: Vec, sx: number): void {
         const f = this.frame;
         const p = this.flowPhase;
-        const s = this.out('scale');
+        const s = this.out('scale') * this.mass;
         const yaw = this.value.gx * 0.14 * R;
         const blobs: [number, number, number, number, number][] = [
             // radio de órbita, velocidad, fase, rx, ry (en R)
@@ -1528,12 +1983,14 @@ export class KaiEngine {
     private composeShadow(o: Vec, bottom: number, sx: number): void {
         const ground = R + 16;
         const gap = clamp((ground - bottom) / R, 0, 1.5);
+        // La sombra acompaña al volumen visible y a la altura.
+        const m = this.mass;
         Object.assign(this.frame.shadow, {
             cx: n2(o.x),
             cy: ground,
-            rx: n2(R * 0.66 * sx * (1 - 0.3 * gap)),
-            ry: n2(R * 0.075 * (1 - 0.25 * gap)),
-            opacity: n2(clamp(0.95 - 0.45 * gap, 0.2, 1)),
+            rx: n2(R * 0.66 * sx * m * (1 - 0.3 * gap)),
+            ry: n2(R * 0.075 * Math.sqrt(m) * (1 - 0.25 * gap)),
+            opacity: n2(clamp(0.95 - 0.45 * gap, 0.2, 1) * Math.pow(m, 0.7)),
         });
     }
 

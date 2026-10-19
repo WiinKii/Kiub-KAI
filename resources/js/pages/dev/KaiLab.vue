@@ -32,11 +32,21 @@ import {
     stressSequence,
     useKaiSequence,
 } from '@/components/kai/lab/useKaiSequence';
-import { REACTION_CATALOG, STATE_CATALOG } from '@/lib/kai/catalog';
+import {
+    EMERGE_PHASE_LABELS,
+    REACTION_CATALOG,
+    STATE_CATALOG,
+} from '@/lib/kai/catalog';
 import { KIUB_GUIDE } from '@/lib/kai/guide';
 import type { KaiNotice } from '@/lib/kai/guide';
 import { activeTicks } from '@/lib/kai/ticker';
-import type { KaiReaction, KaiReactionResult, KaiState } from '@/lib/kai/types';
+import type {
+    KaiEmergePhase,
+    KaiEmergeResult,
+    KaiReaction,
+    KaiReactionResult,
+    KaiState,
+} from '@/lib/kai/types';
 
 defineOptions({
     layout: {
@@ -144,6 +154,41 @@ function react(name: KaiReaction) {
 function blink() {
     kai.value?.blink();
     sizes.value?.blink();
+}
+
+/* ── Aparición «Convergencia»: solo en el protagonista ─────────────── */
+const emergePhase = ref<KaiEmergePhase | null>(null);
+// Cámara lenta solo mientras se reproduce; se combina con la velocidad.
+const heroTimeScale = computed(
+    () =>
+        settings.timeScale *
+        (settings.emergeSlow && emergePhase.value ? 0.25 : 1),
+);
+
+function emerge(mode: 'play' | 'restart') {
+    // Pulsar «Reproducir» durante la aparición no superpone otra.
+    if (mode === 'play' && emergePhase.value) {
+        return;
+    }
+
+    sequence.stop();
+    void kai.value?.emerge();
+}
+
+function onEmergeStart() {
+    addLog('Aparición: comienza', 'reaction');
+}
+
+function onEmergePhase({ phase }: { phase: KaiEmergePhase }) {
+    emergePhase.value = phase;
+}
+
+function onEmergeEnd({ cancelled }: KaiEmergeResult) {
+    emergePhase.value = null;
+    addLog(
+        cancelled ? 'Aparición: reiniciada o cortada' : 'Aparición: en reposo',
+        cancelled ? 'interrupted' : 'reaction',
+    );
 }
 
 function runSequence(id: string) {
@@ -295,6 +340,13 @@ onBeforeUnmount(() => {
                         <span v-if="reaction" class="kl-stage-reaction">
                             {{ REACTION_CATALOG[reaction].label }}
                         </span>
+                        <span
+                            v-if="emergePhase"
+                            class="kl-stage-reaction"
+                            data-stage-emerge
+                        >
+                            Aparición · {{ EMERGE_PHASE_LABELS[emergePhase] }}
+                        </span>
                     </div>
                     <p v-if="sequence.running.value" class="kl-stage-caption">
                         {{ sequence.caption.value }}
@@ -319,7 +371,7 @@ onBeforeUnmount(() => {
                         :paused="settings.paused"
                         :reduced-motion="settings.motion"
                         :intensity="settings.intensity"
-                        :time-scale="settings.timeScale"
+                        :time-scale="heroTimeScale"
                         :colors="settings.colors"
                         :mouth="settings.mouth"
                         :blush="settings.blush"
@@ -328,6 +380,9 @@ onBeforeUnmount(() => {
                         @state-change="onStateChange"
                         @reaction-start="onReactionStart"
                         @reaction-end="onReactionEnd"
+                        @emerge-start="onEmergeStart"
+                        @emerge-phase="onEmergePhase"
+                        @emerge-end="onEmergeEnd"
                     />
                 </div>
 
@@ -381,12 +436,14 @@ onBeforeUnmount(() => {
                     :sequence="sequence.running.value"
                     :caption="sequence.caption.value"
                     :progress="sequence.progress.value"
+                    :emerge-phase="emergePhase"
                     @set-state="setState"
                     @react="react"
                     @blink="blink"
                     @run-sequence="runSequence"
                     @stop-sequence="sequence.stop"
                     @update="updateSettings"
+                    @emerge="emerge"
                 />
             </aside>
         </div>
@@ -425,7 +482,9 @@ estado.value = 'waiting';
 // Gesto temporal: vuelve solo al estado vigente.
 await kai.value.react('success', { next: 'idle' });
 // Operación real: trabaja mientras la promesa está pendiente.
-await kai.value.track(guardarSolicitud(datos), { failure: 'error' });</code></pre>
+await kai.value.track(guardarSolicitud(datos), { failure: 'error' });
+// Aparición: se forma con gotas que se funden y despierta.
+await kai.value.emerge();</code></pre>
         </section>
     </div>
     <Teleport to="body">

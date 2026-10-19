@@ -21,6 +21,9 @@ navegación.
 
 En el laboratorio:
 
+- **Aparición** «Convergencia: KAI cobra vida»: reproducir, reiniciar,
+  indicador de fase y reproducción lenta (×0,25) para revisar la fusión. Solo
+  en el protagonista.
 - **Estados** (interacción y emociones), **reacciones** y **secuencias**.
 - **Apariencia**: boca (apagada por defecto), rubor, ambiente (lóbulos y motas),
   selector de los cuatro colores, preajustes y **«Reiniciar color original»**.
@@ -49,6 +52,7 @@ En el laboratorio:
 | `resources/js/lib/kai/face.ts` | Ojos (cápsula, «◠», «◡», «—»), espiral, corazón y boca. |
 | `resources/js/lib/kai/sprites.ts` | Partículas: notas, corazones, zetas, estrellas, puntos. |
 | `resources/js/lib/kai/palette.ts` | Colores, preajustes y tonos derivados (`--kai-*`). |
+| `resources/js/lib/kai/emerge.ts` | Aparición «Convergencia»: parámetros, fases y coreografía (función del tiempo). |
 | `resources/js/lib/kai/guide.ts` | Contenido del chat por sección (de ejemplo), búsqueda por palabras y sección según la URL. |
 | `resources/js/lib/kai/motion.ts` | Canales de pose, muelles y tiempos. |
 | `resources/js/lib/kai/states.ts` | Estados y reacciones: pose, cues y rig de cada uno. |
@@ -231,6 +235,8 @@ contestar y mira la conversación.
 | `blink()`, `pause()`, `resume()` | Parpadeo puntual y pausa manual. |
 | `nudge(vx, vy)` | Empujón elástico externo, en radios/s: la masa se desplaza, se deforma por inercia y vuelve con rebote. Se ignora con movimiento reducido. |
 | `point({ x, y } \| null)` | Saca una manita hacia una dirección de la pantalla (y mira hacia allí), o la recoge. |
+| `emerge()` | Aparición «Convergencia» (ver más abajo). Devuelve una promesa con `{ cancelled }`. |
+| `cancelEmerge()` | Termina la aparición ya, desde la pose actual, y aplica lo pendiente. |
 
 ### Atributos
 
@@ -289,6 +295,79 @@ Reglas de transición:
   el estado al que el gesto ya iba a volver no lo corta.
 - KAI nunca anuncia una acción que no ocurrió: `track` solo celebra cuando la
   promesa real se resuelve.
+
+## Aparición «Convergencia: KAI cobra vida»
+
+Un organismo líquido que se reúne, toma forma y despierta (≈ 2,8 s).
+
+```ts
+// Solo en la instancia a la que se llama (no en el KAI flotante ni en otras).
+const { cancelled } = await kai.value.emerge();
+```
+
+| Fase | Tiempo | Qué ocurre |
+| --- | --- | --- |
+| Primer pulso (`pulse`) | 0–0,4 s | El escenario empieza vacío. Una gota pequeña se condensa algo desplazada del centro y late una vez (se comprime y se estira). |
+| Atracción (`attraction`) | 0,4–1,1 s | Dos gotas de distinto tamaño se condensan cerca (arriba a la izquierda y abajo a la derecha) y se acercan por curvas cortas y asimétricas que aceleran al final. Se alargan hacia el punto de encuentro y el cuerpo se tiende hacia cada una. |
+| Fusión (`fusion`) | 1,1–1,6 s | Al acercarse las superficies aparece un cuello que se ensancha. Cada gota se vacía a través de él mientras su volumen pasa al cuerpo; cada incorporación empuja la masa (inercia) y lanza una onda que recorre el contorno. Las llegadas van escalonadas, y la segunda deja una protuberancia lateral. |
+| Despertar (`awakening`) | 1,6–2,1 s | La protuberancia se absorbe. Los ojos aparecen como dos líneas cerradas, se entreabren (primero el izquierdo), parpadean y se abren; KAI mira la última incorporación. |
+| Reconocimiento (`recognition`) | 2,1–2,8 s | La mirada vuelve al frente, inclina la cabeza con curiosidad, parpadea y se asienta con un rebote elástico: un saludo silencioso. Entra en reposo. |
+
+**Técnica.** Usa el mismo campo de metabolas que el resto de KAI, así que hay
+una sola superficie continua y no quedan bordes internos. Se añadieron:
+
+- Gotas alargadas como elipses de área constante.
+- Volumen conservado: el motor compara en cada fotograma el área trazada con
+  el líquido que existe y ajusta todo el líquido, de modo que el puente toma
+  su volumen de las masas que une.
+- Ondas de impacto que viajan por el contorno.
+- El brillo de esfera de cada gota se apaga al formarse el puente.
+
+Las gotas comparten el material de KAI y el degradado acompaña al volumen
+visible. La sombra crece con el volumen y sigue la altura. Coste medido: 0,8
+ms por fotograma; 60 fps en el navegador.
+
+**Ciclo de vida** (en el reloj del motor, sin temporizadores; pausa y
+velocidad incluidas):
+
+- **Inicio**: `emerge()` vacía el escenario al instante y empieza. Corta el
+  gesto en curso.
+- **Durante**: la aparición es dueña del contorno. Reposo, emociones, lóbulos,
+  parpadeos, mirada automática, juegos y arrastre no compiten. Si se pide un
+  estado o un gesto, se guarda la última petición de cada tipo; la sustituida
+  se resuelve como cortada.
+- **Finalización**: la pose final ya es la de reposo y el motor habitual sigue
+  desde ella, sin salto (comprobado: 0 px entre fotogramas en el relevo). El
+  reposo entra en la ventana tranquila de su ciclo: los lóbulos y las motas
+  llegan después (si el ambiente está activado). Luego se aplican el estado y
+  el gesto pendientes.
+- **Cancelación**: `cancelEmerge()` entrega el control desde la pose actual.
+  Las gotas que quedan se funden con muelle, el volumen se completa sin saltos
+  y se aplica lo pendiente.
+- **Reinicio**: volver a llamar a `emerge()` cancela la anterior sin aplicar lo
+  pendiente y empieza una sola secuencia limpia.
+- **Eventos**: `emerge-start` (`{ reduced }`), `emerge-phase` (`{ phase }`) y
+  `emerge-end` (`{ cancelled }`). La raíz refleja `data-kai-emerge` con la fase.
+
+**Movimiento reducido**: aparición suave en ~1 s (visibilidad y apertura de
+ojos), sin gotas, trayectorias, deformaciones ni rebotes. Fase `gentle`;
+termina en el mismo estado.
+
+**Afinar** (`EMERGE` en `lib/kai/emerge.ts`):
+
+| Parámetro | Por defecto | Efecto |
+| --- | --- | --- |
+| `duration` | `2.8` | Duración total; toda la coreografía se escala. |
+| `reducedDuration` | `1` | Duración de la variante suave. |
+| `separation` | `1` | Distancia de partida de las gotas (mayor = más recorrido; por encima de ~1,2 pueden salirse del escenario compacto). |
+| `elasticity` | `1` | Ondas, empujones de inercia y rebote de asentamiento. |
+| `stretch` | `1.34` | Alargamiento de una gota al acercarse (1 = redonda). |
+| `core`, `dropA`, `dropB` | `0.5`, `0.64`, `0.58` | Radios de la gota inicial y de las dos que llegan (su volumen suma el del reposo). |
+| `idleOffset` | `10.5` | Punto del ciclo de reposo en que entra (ventana sin lóbulos). |
+
+La **intensidad** del laboratorio escala inclinaciones, empujones, ondas y
+rebote, pero no la fusión. Los tiempos de cada gota (`appear`, `travel`), sus
+salidas y curvaturas están en `A` y `B` del mismo archivo.
 
 ## Juegos
 

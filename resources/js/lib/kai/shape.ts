@@ -61,6 +61,11 @@ export type BodyShape = {
     pull: number;
     /** Tiempo del motor, en segundos. */
     t: number;
+    /**
+     * Ondas que recorren el contorno desde un impacto (ángulo local, edad en
+     * s y amplitud en radios): dos frentes que se separan y se apagan.
+     */
+    waves?: { angle: number; age: number; amp: number }[];
 };
 
 export type Vec = { x: number; y: number };
@@ -130,6 +135,9 @@ export class BodyTransform {
     }
 }
 
+/** Velocidad angular de las ondas de impacto (rad/s). */
+const WAVE_SPEED = 3.6;
+
 function wrap(angle: number): number {
     return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
@@ -166,6 +174,24 @@ export function computeLocalContour(s: BodyShape, local: Float64Array): void {
                 s.ripple *
                 (0.045 * Math.sin(3 * th - 1.35 * t) +
                     0.022 * Math.sin(2 * th + 0.85 * t + 1.1));
+        }
+
+        if (s.waves) {
+            for (const w of s.waves) {
+                // Sube rápido, se apaga despacio y se ensancha al viajar.
+                const a =
+                    w.amp *
+                    (1 - Math.exp(-w.age / 0.05)) *
+                    Math.exp(-w.age * 2.4);
+                const spread = 0.42 + 0.3 * w.age;
+                const d1 = wrap(th - w.angle - WAVE_SPEED * w.age);
+                const d2 = wrap(th - w.angle + WAVE_SPEED * w.age);
+                const k = 2 * spread * spread;
+                r +=
+                    a *
+                    0.5 *
+                    (Math.exp(-(d1 * d1) / k) + Math.exp(-(d2 * d2) / k));
+            }
         }
 
         if (mag > 1e-4) {

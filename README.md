@@ -58,8 +58,10 @@ scroll; saluda, mira al cursor, se mece con el scroll y se duerme si no hay
 actividad; al pulsarlo abre un chat guiado por sección, sin IA, y enseña los
 avisos en un globito) en `resources/js/components/kai/`, y su motor en
 `resources/js/lib/kai/`.
-De momento solo se muestra en el laboratorio de desarrollo **`/dev/kai`**
-(colores, boca, rubor, juegos y todos los estados), que se registra únicamente
+Incluye una aparición, «Convergencia: KAI cobra vida», en la que las gotas se
+funden y KAI despierta. De momento solo se muestra en el laboratorio de
+desarrollo **`/dev/kai`** (aparición, colores, boca, rubor, juegos y todos los
+estados), que se registra únicamente
 en local (`routes/dev.php`, incluido desde `routes/web.php`).
 
 Estados, API, decisiones técnicas y limitaciones: [`docs/kai.md`](docs/kai.md).

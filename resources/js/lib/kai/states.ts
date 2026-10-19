@@ -204,7 +204,9 @@ const FIDGET_LENGTH = [2.3, 1.2, 2.6];
 
 function idleFidget(c: RigContext): void {
     const m = c.mem;
-    m.next ??= 10 + c.rand() * 8;
+    // Relativo a cuando empezó el reposo (también si entra a mitad de ciclo,
+    // como tras la aparición): el primer gesto espera 10-18 s.
+    m.next ??= c.t + 10 + c.rand() * 8;
 
     if (m.start === undefined) {
         if (c.t < m.next) {

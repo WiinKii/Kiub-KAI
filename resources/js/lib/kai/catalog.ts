@@ -2,7 +2,7 @@
  * Nombres y descripciones de los estados de KAI para la interfaz.
  */
 
-import type { KaiReaction, KaiState } from './types';
+import type { KaiEmergePhase, KaiReaction, KaiState } from './types';
 
 export type CatalogEntry = { label: string; description: string };
 
@@ -140,4 +140,23 @@ export const STATE_GROUPS: { label: string; states: KaiState[] }[] = [
         ],
     },
     { label: 'Emociones', states: ['content', 'music', 'sleeping', 'shy'] },
+];
+
+/** Nombres de las fases de la aparición «Convergencia». */
+export const EMERGE_PHASE_LABELS: Record<KaiEmergePhase, string> = {
+    pulse: 'Primer pulso',
+    attraction: 'Atracción',
+    fusion: 'Fusión',
+    awakening: 'Despertar',
+    recognition: 'Reconocimiento',
+    gentle: 'Aparición suave',
+};
+
+/** Fases de la aparición completa, en orden (la suave es aparte). */
+export const EMERGE_STEPS: KaiEmergePhase[] = [
+    'pulse',
+    'attraction',
+    'fusion',
+    'awakening',
+    'recognition',
 ];

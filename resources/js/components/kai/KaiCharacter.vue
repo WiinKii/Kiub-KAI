@@ -22,6 +22,8 @@ import { R, VIEWBOX } from '@/lib/kai/shape';
 import { MAX_SPRITES, SPRITE_PATHS, STROKED } from '@/lib/kai/sprites';
 import { activeTicks, subscribeTick } from '@/lib/kai/ticker';
 import type {
+    KaiEmergePhase,
+    KaiEmergeResult,
     KaiGaze,
     KaiReactOptions,
     KaiReaction,
@@ -103,6 +105,9 @@ const emit = defineEmits<{
     stateChange: [payload: { from: KaiState; to: KaiState }];
     reactionStart: [payload: { name: KaiReaction }];
     reactionEnd: [payload: KaiReactionResult];
+    emergeStart: [payload: { reduced: boolean }];
+    emergePhase: [payload: { phase: KaiEmergePhase }];
+    emergeEnd: [payload: KaiEmergeResult];
 }>();
 
 const SIZES = { sm: 48, md: 120, lg: 240 } as const;
@@ -171,6 +176,7 @@ const glowEl = ref<SVGUseElement | null>(null);
 const highlightEl = ref<SVGEllipseElement | null>(null);
 const mouthEl = ref<SVGPathElement | null>(null);
 const badgeEl = ref<HTMLElement | null>(null);
+const presenceEl = ref<SVGGElement | null>(null);
 const faceEl = ref<SVGGElement | null>(null);
 
 type Slots = (Element | null)[];
@@ -234,6 +240,8 @@ function render() {
     const f = engine.frame;
 
     attr(shapeEl.value, 'd', f.shape || 'M0 0');
+    attr(presenceEl.value, 'opacity', f.presence);
+    attr(baseEl.value, 'r', f.baseR);
     attr(baseEl.value, 'cx', f.cx);
     attr(baseEl.value, 'cy', f.cy - R * 0.15);
     attr(baseEl.value, 'fx', f.cx - R * 0.2);
@@ -410,6 +418,7 @@ watch(running, (value) => (value ? start() : stop()));
 
 /* ── Sincronización con las props ────────────────────────────────────── */
 watch(state, (value) => {
+    // Durante la aparición el motor la guarda y la aplica al terminar.
     if (value !== engine.state) {
         engine.setState(value);
         wake();
@@ -466,6 +475,9 @@ watch(showBadge, (visible) => {
     }
 });
 
+// Fase de la aparición en curso (`data-kai-emerge`), o null.
+const emergePhase = ref<KaiEmergePhase | null>(null);
+
 // Gesto en curso, también como atributo (`data-kai-reaction`) para estilos y pruebas.
 const reaction = ref<KaiReaction | null>(null);
 
@@ -487,6 +499,15 @@ const offEvents = [
         }
 
         emit('reactionEnd', payload);
+    }),
+    engine.on('emergeStart', (payload) => emit('emergeStart', payload)),
+    engine.on('emergePhase', (payload) => {
+        emergePhase.value = payload.phase;
+        emit('emergePhase', payload);
+    }),
+    engine.on('emergeEnd', (payload) => {
+        emergePhase.value = null;
+        emit('emergeEnd', payload);
     }),
 ];
 
@@ -734,7 +755,30 @@ let trackToken = 0;
 
 function setState(next: KaiState) {
     engine.setState(next);
-    state.value = next;
+
+    // Durante la aparición queda pendiente: el modelo cambia cuando se aplica.
+    if (!engine.emergePhase) {
+        state.value = next;
+    }
+
+    wake();
+}
+
+/**
+ * Aparición «Convergencia» en esta instancia (no en las demás). Volver a
+ * llamarla reinicia; se resuelve al terminar o al cancelarse.
+ */
+function emerge(): Promise<KaiEmergeResult> {
+    const result = engine.emerge();
+    // El escenario se vacía ya, aunque el bucle esté parado.
+    render();
+    wake();
+
+    return result;
+}
+
+function cancelEmerge() {
+    engine.cancelEmerge();
     wake();
 }
 
@@ -823,6 +867,7 @@ function inspect() {
     return {
         state: engine.state,
         reaction: engine.activeReaction,
+        emerge: engine.emergePhase,
         area: engine.frame.area,
         running: unsubscribe !== null,
     };
@@ -836,6 +881,8 @@ defineExpose({
     blink,
     nudge,
     point,
+    emerge,
+    cancelEmerge,
     pause,
     resume,
     inspect,
@@ -868,6 +915,7 @@ onBeforeUnmount(() => {
         :data-surface="surface"
         :data-kai-state="state"
         :data-kai-reaction="reaction || undefined"
+        :data-kai-emerge="emergePhase || undefined"
         :data-small="px < 64 || undefined"
         :style="{
             width: `${px}px`,
@@ -901,7 +949,6 @@ onBeforeUnmount(() => {
                     ref="baseEl"
                     :id="ids.base"
                     gradientUnits="userSpaceOnUse"
-                    :r="R * 1.25"
                 >
                     <stop offset="0" class="kai-stop-ice" />
                     <stop offset="0.48" class="kai-stop-primary" />
@@ -1002,150 +1049,153 @@ onBeforeUnmount(() => {
                 </filter>
             </defs>
 
-            <ellipse
-                ref="shadowEl"
-                class="kai-shadow"
-                :fill="url(ids.shadow)"
-            />
-
-            <!-- Gotitas sueltas (detrás: dentro del cuerpo no se ven) -->
-            <g>
-                <circle
-                    v-for="i in MAX_SATS"
-                    :key="`dot-${i}`"
-                    :ref="slot(dotEls, i - 1)"
-                    :fill="url(ids.dots[(i - 1) % 3])"
-                    visibility="hidden"
+            <!-- Todo lo visible: la aparición lo hace surgir desde la nada -->
+            <g ref="presenceEl">
+                <ellipse
+                    ref="shadowEl"
+                    class="kai-shadow"
+                    :fill="url(ids.shadow)"
                 />
-            </g>
 
-            <!-- Fluido: degradado base, manchas de color que giran y brillos -->
-            <g :clip-path="url(ids.clip)">
-                <use :href="shapeHref" :fill="url(ids.base)" />
-                <g :filter="url(ids.soft)">
-                    <ellipse
-                        :ref="slot(blobEls, 0)"
-                        class="kai-blob kai-blob--accent"
-                    />
-                    <ellipse
-                        :ref="slot(blobEls, 1)"
-                        class="kai-blob kai-blob--ice"
-                    />
-                    <ellipse
-                        :ref="slot(blobEls, 2)"
-                        class="kai-blob kai-blob--deep"
-                    />
-                    <ellipse
-                        :ref="slot(blobEls, 3)"
-                        class="kai-blob kai-blob--orchid"
-                    />
+                <!-- Gotitas sueltas (detrás: dentro del cuerpo no se ven) -->
+                <g>
                     <circle
                         v-for="i in MAX_SATS"
-                        :key="`sat-${i}`"
-                        :ref="slot(satEls, i - 1)"
-                        class="kai-sat"
+                        :key="`dot-${i}`"
+                        :ref="slot(dotEls, i - 1)"
                         :fill="url(ids.dots[(i - 1) % 3])"
                         visibility="hidden"
                     />
-                    <use ref="coolEl" :href="shapeHref" class="kai-cool" />
-                    <use ref="glowEl" :href="shapeHref" class="kai-glow" />
-                    <!-- Borde más saturado y base luminosa: volumen de vidrio -->
-                    <use :href="shapeHref" class="kai-edge" />
+                </g>
+
+                <!-- Fluido: degradado base, manchas de color que giran y brillos -->
+                <g :clip-path="url(ids.clip)">
+                    <use :href="shapeHref" :fill="url(ids.base)" />
+                    <g :filter="url(ids.soft)">
+                        <ellipse
+                            :ref="slot(blobEls, 0)"
+                            class="kai-blob kai-blob--accent"
+                        />
+                        <ellipse
+                            :ref="slot(blobEls, 1)"
+                            class="kai-blob kai-blob--ice"
+                        />
+                        <ellipse
+                            :ref="slot(blobEls, 2)"
+                            class="kai-blob kai-blob--deep"
+                        />
+                        <ellipse
+                            :ref="slot(blobEls, 3)"
+                            class="kai-blob kai-blob--orchid"
+                        />
+                        <circle
+                            v-for="i in MAX_SATS"
+                            :key="`sat-${i}`"
+                            :ref="slot(satEls, i - 1)"
+                            class="kai-sat"
+                            :fill="url(ids.dots[(i - 1) % 3])"
+                            visibility="hidden"
+                        />
+                        <use ref="coolEl" :href="shapeHref" class="kai-cool" />
+                        <use ref="glowEl" :href="shapeHref" class="kai-glow" />
+                        <!-- Borde más saturado y base luminosa: volumen de vidrio -->
+                        <use :href="shapeHref" class="kai-edge" />
+                        <use
+                            :href="shapeHref"
+                            class="kai-caustic"
+                            :stroke="url(ids.caustic)"
+                        />
+                        <ellipse ref="highlightEl" class="kai-highlight" />
+                    </g>
+                    <circle
+                        v-for="i in MAX_SATS"
+                        :key="`lens-${i}`"
+                        :ref="slot(lensEls, i - 1)"
+                        class="kai-lens"
+                        :fill="url(ids.lens)"
+                        visibility="hidden"
+                    />
+                    <!-- Rubor: capa propia con desenfoque suave para que se lea -->
+                    <g :filter="url(ids.blush)">
+                        <ellipse
+                            :ref="slot(blushEls, 0)"
+                            class="kai-blush"
+                            opacity="0"
+                        />
+                        <ellipse
+                            :ref="slot(blushEls, 1)"
+                            class="kai-blush"
+                            opacity="0"
+                        />
+                    </g>
                     <use
                         :href="shapeHref"
-                        class="kai-caustic"
-                        :stroke="url(ids.caustic)"
-                    />
-                    <ellipse ref="highlightEl" class="kai-highlight" />
-                </g>
-                <circle
-                    v-for="i in MAX_SATS"
-                    :key="`lens-${i}`"
-                    :ref="slot(lensEls, i - 1)"
-                    class="kai-lens"
-                    :fill="url(ids.lens)"
-                    visibility="hidden"
-                />
-                <!-- Rubor: capa propia con desenfoque suave para que se lea -->
-                <g :filter="url(ids.blush)">
-                    <ellipse
-                        :ref="slot(blushEls, 0)"
-                        class="kai-blush"
-                        opacity="0"
+                        class="kai-rim-line"
+                        :stroke="url(ids.rim)"
                     />
                     <ellipse
-                        :ref="slot(blushEls, 1)"
-                        class="kai-blush"
-                        opacity="0"
+                        ref="specularEl"
+                        class="kai-specular"
+                        :fill="url(ids.specular)"
                     />
                 </g>
-                <use
-                    :href="shapeHref"
-                    class="kai-rim-line"
-                    :stroke="url(ids.rim)"
-                />
-                <ellipse
-                    ref="specularEl"
-                    class="kai-specular"
-                    :fill="url(ids.specular)"
-                />
-            </g>
 
-            <!-- Rostro -->
-            <g ref="faceEl">
-                <path
-                    :ref="slot(haloEls, 0)"
-                    class="kai-eye-halo"
-                    :filter="url(ids.halo)"
-                />
-                <path
-                    :ref="slot(haloEls, 1)"
-                    class="kai-eye-halo"
-                    :filter="url(ids.halo)"
-                />
-                <path :ref="slot(eyeEls, 0)" class="kai-eye" />
-                <path :ref="slot(eyeEls, 1)" class="kai-eye" />
-                <path
-                    :ref="slot(spiralEls, 0)"
-                    class="kai-spiral"
-                    :d="SPIRAL"
-                    opacity="0"
-                />
-                <path
-                    :ref="slot(spiralEls, 1)"
-                    class="kai-spiral"
-                    :d="SPIRAL"
-                    opacity="0"
-                />
-                <path
-                    :ref="slot(heartEls, 0)"
-                    class="kai-heart"
-                    :d="HEART"
-                    opacity="0"
-                />
-                <path
-                    :ref="slot(heartEls, 1)"
-                    class="kai-heart"
-                    :d="HEART"
-                    opacity="0"
-                />
-                <path v-if="mouth" ref="mouthEl" class="kai-mouth" />
-            </g>
+                <!-- Rostro -->
+                <g ref="faceEl">
+                    <path
+                        :ref="slot(haloEls, 0)"
+                        class="kai-eye-halo"
+                        :filter="url(ids.halo)"
+                    />
+                    <path
+                        :ref="slot(haloEls, 1)"
+                        class="kai-eye-halo"
+                        :filter="url(ids.halo)"
+                    />
+                    <path :ref="slot(eyeEls, 0)" class="kai-eye" />
+                    <path :ref="slot(eyeEls, 1)" class="kai-eye" />
+                    <path
+                        :ref="slot(spiralEls, 0)"
+                        class="kai-spiral"
+                        :d="SPIRAL"
+                        opacity="0"
+                    />
+                    <path
+                        :ref="slot(spiralEls, 1)"
+                        class="kai-spiral"
+                        :d="SPIRAL"
+                        opacity="0"
+                    />
+                    <path
+                        :ref="slot(heartEls, 0)"
+                        class="kai-heart"
+                        :d="HEART"
+                        opacity="0"
+                    />
+                    <path
+                        :ref="slot(heartEls, 1)"
+                        class="kai-heart"
+                        :d="HEART"
+                        opacity="0"
+                    />
+                    <path v-if="mouth" ref="mouthEl" class="kai-mouth" />
+                </g>
 
-            <!-- Partículas: notas, corazones, zetas, destellos -->
-            <g class="kai-sprites">
-                <path
-                    v-for="i in MAX_SPRITES"
-                    :key="`sprite-${i}`"
-                    :ref="slot(spriteEls, i - 1)"
-                    class="kai-sprite"
-                    visibility="hidden"
-                />
-            </g>
+                <!-- Partículas: notas, corazones, zetas, destellos -->
+                <g class="kai-sprites">
+                    <path
+                        v-for="i in MAX_SPRITES"
+                        :key="`sprite-${i}`"
+                        :ref="slot(spriteEls, i - 1)"
+                        class="kai-sprite"
+                        visibility="hidden"
+                    />
+                </g>
 
-            <g v-if="debug" class="kai-debug">
-                <circle cx="0" cy="0" :r="R" />
-                <line x1="-72" :y1="R + 16" x2="72" :y2="R + 16" />
+                <g v-if="debug" class="kai-debug">
+                    <circle cx="0" cy="0" :r="R" />
+                    <line x1="-72" :y1="R + 16" x2="72" :y2="R + 16" />
+                </g>
             </g>
         </svg>
         <span
