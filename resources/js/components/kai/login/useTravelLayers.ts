@@ -2,8 +2,8 @@
  * Entorno de viaje del inicio de sesión, dibujado en un `<canvas>`.
  *
  * Tres profundidades que se desplazan en sentido contrario a KAI, cada una
- * a su velocidad: degradados amplios y lentos al fondo, trazos suaves y
- * gotas en el plano medio, y reflejos alargados y rápidos delante. Todo se
+ * a su velocidad: degradados amplios y lentos al fondo, trazos anchos y
+ * destellos en el plano medio, y reflejos alargados y rápidos delante. Todo se
  * repite sobre un toro mayor que el panel, así el ciclo es continuo y nunca
  * se ve un reinicio. En reposo deriva muy despacio.
  */
@@ -21,7 +21,7 @@ export type TravelLayers = {
 
 type Far = { x: number; y: number; r: number; color: string; alpha: number };
 type Stroke = { x: number; y: number; len: number; w: number; alpha: number };
-type Bubble = { x: number; y: number; r: number; alpha: number };
+type Sparkle = { x: number; y: number; r: number; alpha: number };
 type Streak = {
     x: number;
     y: number;
@@ -45,7 +45,7 @@ function mulberry32(seed: number): () => number {
 }
 
 /** Velocidad del plano en px/s a velocidad 1. */
-const DEPTH = { far: 26, mid: 150, near: 520 };
+const DEPTH = { far: 40, mid: 300, near: 900 };
 /** Margen del toro: los elementos salen del todo antes de reaparecer. */
 const WRAP = 160;
 
@@ -74,27 +74,21 @@ export function createTravelLayers(
     const strokes: Stroke[] = Array.from({ length: 14 }, () => ({
         x: rand(),
         y: rand(),
-        len: 40 + rand() * 120,
-        w: 6 + rand() * 14,
+        len: 60 + rand() * 160,
+        w: 10 + rand() * 16,
         alpha: 0.1 + rand() * 0.2,
     }));
-    const sparkles: Bubble[] = Array.from({ length: 10 }, () => ({
+    const sparkles: Sparkle[] = Array.from({ length: 10 }, () => ({
         x: rand(),
         y: rand(),
         r: 3 + rand() * 4,
         alpha: rand() * Math.PI * 2,
     }));
-    const bubbles: Bubble[] = Array.from({ length: 12 }, () => ({
-        x: rand(),
-        y: rand(),
-        r: 2.5 + rand() * 9,
-        alpha: 0.35 + rand() * 0.45,
-    }));
     const streaks: Streak[] = Array.from({ length: 26 }, () => ({
         x: rand(),
         y: rand(),
-        len: 0.4 + rand() * 0.9,
-        w: 1 + rand() * 1.8,
+        len: 0.5 + rand() * 0.9,
+        w: 2 + rand() * 2.4,
         alpha: 0.25 + rand() * 0.5,
         tw: rand() * Math.PI * 2,
     }));
@@ -161,30 +155,11 @@ export function createTravelLayers(
             ctx.stroke();
         }
 
-        for (const b of bubbles) {
-            const p = place(b.x, b.y, (DEPTH.mid * 1.25) / DEPTH.near);
-            const g = ctx.createRadialGradient(
-                p.x - b.r * 0.35,
-                p.y - b.r * 0.4,
-                b.r * 0.1,
-                p.x,
-                p.y,
-                b.r,
-            );
-            g.addColorStop(0, `rgba(255,255,255,${0.55 * b.alpha})`);
-            g.addColorStop(0.55, `rgba(150,190,255,${0.18 * b.alpha})`);
-            g.addColorStop(1, `rgba(92,157,255,${0.32 * b.alpha})`);
-            ctx.fillStyle = g;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, b.r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
         // Destellos de cuatro puntas que titilan (plano medio-cercano).
         ctx.fillStyle = '#ffffff';
 
         for (const sp of sparkles) {
-            const p = place(sp.x, sp.y, 0.7);
+            const p = place(sp.x, sp.y, 0.95);
             const tw = 0.5 + 0.5 * Math.sin(time * 3.1 + sp.alpha);
             const a = (0.25 + 0.6 * travel) * tw;
 

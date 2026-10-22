@@ -266,8 +266,6 @@ function render() {
             attr(el, 'cx', s.cx);
             attr(el, 'cy', s.cy);
             attr(el, 'r', s.r);
-            // Gotas con tinte propio (división hacia el navbar).
-            attr(el, 'fill', s.color || url(ids.dots[i % 3]));
         }
 
         if (merged && s.lens > 0) {
@@ -769,7 +767,7 @@ function setState(next: KaiState) {
 
 /**
  * Aparición en esta instancia (no en las demás): «Convergencia» por
- * defecto, `'stream'` o `'split'`. Volver a llamarla reinicia; se resuelve
+ * defecto, o `'stream'`. Volver a llamarla reinicia; se resuelve
  * al terminar o al cancelarse.
  */
 function emerge(kind?: KaiEmergeKind): Promise<KaiEmergeResult> {
@@ -873,8 +871,8 @@ function setHeading(angle: number) {
 }
 
 /**
- * Posición en pantalla (px) del centro del cuerpo y de las gotas visibles,
- * con su radio y tinte: sirve para entregar las gotas a otra capa.
+ * Centro del cuerpo y radio en reposo, en píxeles de pantalla: para que
+ * otra capa (estela, llegada al navbar) siga a KAI.
  */
 function screenGeometry() {
     const rect = root.value?.getBoundingClientRect();
@@ -893,15 +891,8 @@ function screenGeometry() {
     return {
         scale: k,
         center: map(f.cx, f.cy),
-        drops: f.sats
-            .map((s, slot) => ({
-                ...map(s.cx, s.cy),
-                r: s.r * k * 0.8,
-                slot,
-                color: s.color,
-                visible: s.visible,
-            }))
-            .filter((d) => d.visible),
+        /** Radio del cuerpo en reposo, en px. */
+        radius: R * k,
     };
 }
 

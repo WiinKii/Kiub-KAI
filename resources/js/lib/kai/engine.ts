@@ -15,14 +15,7 @@ import {
     nominalTime,
 } from './emerge';
 import type { EmergeContext, EmergeDrop } from './emerge';
-import {
-    SPLIT,
-    STREAM,
-    splitFrame,
-    splitReducedFrame,
-    streamFrame,
-    streamNominal,
-} from './stream';
+import { STREAM, streamFrame, streamNominal } from './stream';
 import { EYE, FACE_RADIUS, eyeStroke, mouthPath } from './face';
 import { BINS, radiiFromContour, traceField } from './field';
 import type { Ball } from './field';
@@ -98,8 +91,6 @@ export type SatFrame = {
     r: number;
     /** Cuánto asoma fuera del cuerpo (0-1): brillo de esfera propia. */
     lens: number;
-    /** Tinte propio ('' = el de KAI). */
-    color: string;
 };
 export type SpriteFrame = {
     visible: boolean;
@@ -173,8 +164,6 @@ type Sat = {
     angle: number;
     /** Brillo de esfera propia (0 = integrado, sin borde interno). */
     glass: number;
-    /** Tinte propio (gotas de la división). */
-    color?: string;
 };
 
 type PendingReaction = {
@@ -316,8 +305,6 @@ export class KaiEngine {
     private pointDir: KaiGaze | null = null;
     /** Aparición en curso, o null. */
     private emergence: Emergence | null = null;
-    /** Tras la división no queda nadie: oculto hasta otra aparición. */
-    private vanished = false;
     /** Dirección de viaje (radianes, pantalla) y la que lleva ahora. */
     private heading = -0.72;
     private headingNow = -0.72;
@@ -410,7 +397,6 @@ export class KaiEngine {
                 cy: 0,
                 r: 0,
                 lens: 0,
-                color: '',
             })),
             highlight: { ...blob(), angle: 0 },
             specular: { ...blob(), angle: 0 },
@@ -638,9 +624,8 @@ export class KaiEngine {
     }
 
     /**
-     * Apariciones: «Convergencia: KAI cobra vida» (por defecto), «Una
-     * corriente que cobra vida» (`'stream'`, inicio de sesión) y la
-     * «División» en cuatro gotas de color (`'split'`, hacia el navbar).
+     * Apariciones: «Convergencia: KAI cobra vida» (por defecto) y «Una
+     * corriente que cobra vida» (`'stream'`, inicio de sesión).
      *
      * - Inicio: el escenario se vacía al instante (sin cuerpo ni ojos) y
      *   empieza la coreografía en el reloj del motor (pausa y velocidad
@@ -654,9 +639,6 @@ export class KaiEngine {
      *   pendiente) y empieza una sola secuencia limpia.
      * - Cancelación: `cancelEmerge()` entrega el control desde la pose actual;
      *   las gotas que queden se funden con muelle y se aplica lo pendiente.
-     * - División: no empieza desde vacío sino desde la pose actual, y al
-     *   terminar KAI queda oculto (las gotas ya son de otro) hasta que otra
-     *   aparición o `cancelEmerge()` lo devuelven.
      */
     emerge(kind: KaiEmergeKind = 'converge'): Promise<KaiEmergeResult> {
         if (this.emergence) {
@@ -680,19 +662,14 @@ export class KaiEngine {
             s.active = false;
         }
 
-        const split = kind === 'split';
-        this.vanished = false;
-
         for (const sat of this.sats) {
             Object.assign(sat, {
-                // La división parte del cuerpo tal como está.
-                active: split ? sat.active : false,
+                active: false,
                 wanted: false,
                 pinned: false,
                 stretch: 1,
                 tStretch: 1,
                 glass: 1,
-                color: undefined,
             });
         }
 
@@ -703,15 +680,12 @@ export class KaiEngine {
             }
         }
 
-        if (!this.reduced && !split) {
+        if (!this.reduced) {
             Object.assign(this.spring, emergeSprings());
         }
 
-        if (!split) {
-            this.mass = this.reduced ? 1 : 0;
-            this.presence = 0;
-        }
-
+        this.mass = this.reduced ? 1 : 0;
+        this.presence = 0;
         this.massCorr = 1;
 
         return new Promise((resolve) => {
@@ -726,11 +700,6 @@ export class KaiEngine {
                 pendingReaction: null,
             };
             this.emit('emergeStart', { reduced: this.reduced, kind });
-
-            if (split) {
-                // Sigue desde la pose actual, con su inercia.
-                return;
-            }
 
             // Pose inicial sin transición: el escenario empieza vacío.
             this.runRig();
@@ -748,8 +717,6 @@ export class KaiEngine {
 
     /** Termina la aparición ya: el motor sigue desde la pose actual. */
     cancelEmerge(): void {
-        this.vanished = false;
-
         if (this.emergence) {
             this.endEmergence(true, true);
         }
@@ -911,9 +878,7 @@ export class KaiEngine {
             }
         }
 
-        if (this.vanished) {
-            this.presence = 0;
-        } else if (!this.emergence) {
+        if (!this.emergence) {
             // Tras una cancelación, volumen y visibilidad vuelven sin saltos.
             this.mass = 1 - (1 - this.mass) * Math.exp(-step * 5);
             this.presence = 1 - (1 - this.presence) * Math.exp(-step * 8);
@@ -1118,18 +1083,8 @@ export class KaiEngine {
 
         // El reposo entra en la ventana tranquila de su ciclo: los lóbulos
         // brotan después, despacio, en lugar de salir todos a la vez.
-        if (!cancelled && this.stateName === 'idle' && run.kind !== 'split') {
+        if (!cancelled && this.stateName === 'idle') {
             this.stateStart -= EMERGE.idleOffset;
-        }
-
-        // Tras dividirse, las gotas ya pertenecen al navbar.
-        if (!cancelled && run.kind === 'split') {
-            this.vanished = true;
-            this.presence = 0;
-
-            for (const sat of this.sats) {
-                sat.active = false;
-            }
         }
 
         const { pendingState, pendingReaction } = run;
@@ -1158,10 +1113,6 @@ export class KaiEngine {
     }
 
     private emergeLength(run: Emergence): number {
-        if (run.kind === 'split') {
-            return run.reduced ? SPLIT.reducedDuration : SPLIT.duration;
-        }
-
         if (run.reduced) {
             return EMERGE.reducedDuration;
         }
@@ -1180,11 +1131,7 @@ export class KaiEngine {
 
         let phase: KaiEmergePhase;
 
-        if (run.kind === 'split') {
-            phase = run.reduced
-                ? splitReducedFrame(elapsed, ctx)
-                : splitFrame(elapsed, ctx);
-        } else if (run.reduced) {
+        if (run.reduced) {
             phase = emergeReducedFrame(elapsed, ctx);
         } else if (run.kind === 'stream') {
             phase = streamFrame(streamNominal(elapsed), ctx);
@@ -1309,7 +1256,6 @@ export class KaiEngine {
             tStretch: drop.stretch,
             angle: drop.angle,
             glass: drop.glass,
-            color: drop.color,
         });
     }
 
@@ -1449,7 +1395,6 @@ export class KaiEngine {
         sat.spring = spring ?? SAT_DEFAULT;
         sat.falloff = falloff;
         sat.tStretch = stretch;
-        sat.color = undefined;
 
         if (stretch !== 1) {
             sat.angle = angle;
@@ -1966,7 +1911,6 @@ export class KaiEngine {
 
             out.cx = n2(sat.x);
             out.cy = n2(sat.y);
-            out.color = sat.color ?? '';
 
             if (out.dot) {
                 // Más pequeño que la rejilla: gotita aparte, siempre redonda.

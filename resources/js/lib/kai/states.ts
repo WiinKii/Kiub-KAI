@@ -490,52 +490,13 @@ const noticeRig: Rig = (c) => {
     }
 };
 
-/* ── Viaje: estela líquida hacia atrás ─────────────────────────────── */
-
-/** Radios de la estela, de la espalda a la punta (se afina hacia atrás). */
-const TRAIL_R = [0.74, 0.68, 0.62, 0.56, 0.5, 0.43, 0.36, 0.28, 0.2];
+/* ── Viaje: KAI conserva su forma; la estela la dibuja la escena ───── */
 
 /**
- * Coloca la estela en sentido contrario a la dirección de viaje.
- * `length` 0 = dentro del cuerpo, 1 = viaje, más = impulso. `wave` es la
- * ondulación lateral y `pulse` (0-1) la posición de un abultamiento de luz
- * que corre de la espalda a la punta (negativo = ninguno).
- */
-function trailRig(
-    c: RigContext,
-    length: number,
-    wave: number,
-    speed: number,
-    pulse: number,
-): void {
-    const back = c.heading + PI;
-    const ux = Math.cos(back);
-    const uy = Math.sin(back);
-    let d = 0.34 + 0.12 * length;
-
-    TRAIL_R.forEach((r0, i) => {
-        const k = i / (TRAIL_R.length - 1);
-        // La ondulación crece hacia la punta y viaja hacia atrás.
-        const sway = wave * Math.pow(k, 1.2) * Math.sin(c.t * speed - i * 0.72);
-        const bulge =
-            pulse < 0 ? 0 : 0.24 * Math.exp(-((i - pulse) ** 2) / 1.6);
-        const breathe = 1 + 0.05 * Math.sin(c.t * 6.3 - i * 0.9);
-        const r =
-            r0 * breathe * (1 + bulge) * (0.45 + 0.55 * Math.min(1, length));
-        const x = ux * d - uy * sway;
-        const y = uy * d + ux * sway;
-        // La cola llega con algo de retraso: latigazo suave al cambiar.
-        const spring: SpringConfig = { w: 24 - i * 1.6, z: 0.72 };
-        c.trail(i, x, y, r * 1.08, 1.25 + 0.2 * length, back, spring);
-        const next = TRAIL_R[i + 1] ?? r0 * 0.7;
-        d += 0.43 * (r0 + next) * length;
-    });
-}
-
-/**
- * Pose de viaje relativa a la dirección: se inclina y se alarga hacia
- * delante. `recoil` (0-1) la retrae hacia atrás (anticipación); `push`
- * la lanza hacia delante.
+ * Pose de viaje relativa a la dirección: el cuerpo apenas se deforma por
+ * la velocidad (el frente se abomba, un leve aplastamiento y una
+ * inclinación mínima), sin estirarse. `recoil` (0-1) lo retrae hacia atrás
+ * (anticipación); `push` lo lanza hacia delante.
  */
 function travelPose(
     c: RigContext,
@@ -547,14 +508,14 @@ function travelPose(
     const fy = Math.sin(c.heading);
     // Inclinación del cuerpo: 0 cuando viaja hacia arriba.
     const tilt = Math.atan2(fx, -fy);
-    const ahead = 0.13 * amount - 0.16 * recoil + 0.1 * push;
-    c.set('rot', tilt * (0.3 * amount + 0.06 * push));
-    c.set('lean', fx * (0.08 * amount - 0.07 * recoil + 0.06 * push));
+    const ahead = 0.08 * amount - 0.12 * recoil + 0.05 * push;
+    c.set('rot', tilt * (0.1 * amount + 0.03 * push));
+    c.set('lean', fx * (0.05 * amount - 0.06 * recoil + 0.03 * push));
     c.set('bx', fx * ahead);
     c.set('by', fy * ahead);
-    c.set('x', fx * (0.04 * amount - 0.07 * recoil + 0.05 * push));
-    c.set('y', fy * (0.04 * amount - 0.07 * recoil + 0.05 * push));
-    c.set('sx', 1 - 0.09 * amount + 0.1 * recoil - 0.08 * push);
+    c.set('x', fx * (0.03 * amount - 0.06 * recoil + 0.04 * push));
+    c.set('y', fy * (0.03 * amount - 0.06 * recoil + 0.04 * push));
+    c.set('sx', 1 - 0.03 * amount + 0.08 * recoil - 0.03 * push);
 }
 
 /** Mirada hacia donde va, con un vaivén mínimo para que no sea fija. */
@@ -566,17 +527,16 @@ function lookAhead(c: RigContext, amount: number): void {
 
 const travelRig: Rig = (c) => {
     // Mira al botón (la interfaz dirige la mirada), retrocede un poco y
-    // se inclina hacia la diagonal; la espalda se estira en estela.
+    // se inclina hacia donde va. La velocidad lo hace vibrar apenas.
     const recoil = smooth(0, 0.12, c.t) * (1 - smooth(0.16, 0.34, c.t));
     const lean = smooth(0.18, 0.5, c.t);
     travelPose(c, lean, recoil, 0);
-    trailRig(c, smooth(0.16, 0.75, c.t), 0.13, 5.2, -1);
 
     if (c.t > 0.34) {
         lookAhead(c, smooth(0.34, 0.6, c.t));
     }
 
-    c.set('wob', 1.3);
+    c.set('wob', 1.35);
     c.set('flow', 1.6);
 };
 
@@ -585,12 +545,8 @@ const rushRig: Rig = (c) => {
     const squeeze = smooth(0, 0.08, c.t) * (1 - smooth(0.1, 0.2, c.t));
     const push = smooth(0.12, 0.3, c.t);
     travelPose(c, 1, squeeze * 0.9, push);
-    c.set('flat', 0.35 * squeeze);
+    c.set('flat', 0.3 * squeeze);
     c.set('scale', 1 - 0.05 * squeeze);
-    const length = 0.75 - 0.15 * squeeze + 0.6 * push;
-    // Un pulso de luz recorre la estela cada 0,8 s.
-    const pulse = c.t > 0.18 ? (((c.t - 0.18) / 0.8) % 1) * 11 - 1 : -1;
-    trailRig(c, length, 0.1, 8, pulse);
     lookAhead(c, 1);
     c.set('wob', 1.5);
     c.set('flow', 2.6);
@@ -1052,11 +1008,11 @@ export const STATES: Record<KaiState, StateDef> = {
         // Pose para movimiento reducido (sin estela): la dirección por defecto.
         pose: {
             ...OPEN,
-            gx: 0.55,
-            gy: -0.38,
-            lean: 0.06,
-            rot: 0.18,
-            sx: 0.93,
+            gx: 0.62,
+            gy: -0.18,
+            lean: 0.04,
+            rot: 0.04,
+            sx: 0.97,
             open: 1.05,
             mSmile: 0.45,
         },
@@ -1093,11 +1049,11 @@ export const STATES: Record<KaiState, StateDef> = {
     rush: {
         pose: {
             ...OPEN,
-            gx: 0.62,
-            gy: -0.42,
-            lean: 0.09,
-            rot: 0.22,
-            sx: 0.88,
+            gx: 0.68,
+            gy: -0.2,
+            lean: 0.05,
+            rot: 0.05,
+            sx: 0.96,
             open: 0.96,
             eyeH: 1.04,
             mSmile: 0.6,

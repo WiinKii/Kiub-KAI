@@ -67,12 +67,12 @@ export const STATE_CATALOG: Record<KaiState, CatalogEntry> = {
     travel: {
         label: 'Viaje',
         description:
-            'Se inclina hacia arriba a la derecha y su espalda se estira en una estela líquida.',
+            'Se inclina hacia donde va y apenas se deforma por la velocidad; la escena dibuja su estela.',
     },
     rush: {
         label: 'Impulso',
         description:
-            'Se comprime y se lanza: el cuerpo se alarga, la estela crece y un pulso de luz la recorre.',
+            'Se comprime y se lanza hacia delante, con un brillo que late mientras espera.',
     },
 };
 
@@ -162,7 +162,6 @@ export const EMERGE_PHASE_LABELS: Record<KaiEmergePhase, string> = {
     fold: 'Giro y pliegue',
     awakening: 'Despertar',
     recognition: 'Reconocimiento',
-    split: 'División',
     gentle: 'Aparición suave',
 };
 

@@ -1,5 +1,5 @@
 /**
- * Aparición «Una corriente que cobra vida» y división en cuatro gotas.
+ * Aparición «Una corriente que cobra vida».
  *
  * Corriente: un cuerpo de agua entra por abajo a la izquierda siguiendo una
  * curva ascendente. La punta concentra el volumen y arrastra una estela que
@@ -10,10 +10,7 @@
  * abren mientras se acomoda. Llega tarde una última gotita por un costado;
  * KAI la mira, oscila dos veces, parpadea y se inclina hacia el formulario.
  *
- * División: KAI se estira en horizontal y se reparte, con puentes que se
- * afinan hasta romperse, en cuatro gotas de colores (el navbar las recoge).
- *
- * Igual que la Convergencia, son funciones puras del tiempo evaluadas por el
+ * Igual que la Convergencia, es una función pura del tiempo evaluada por el
  * motor en su propio reloj.
  */
 
@@ -37,16 +34,6 @@ export const STREAM_PHASES: { id: KaiEmergePhase; from: number }[] = [
     { id: 'awakening', from: 1.45 },
     { id: 'recognition', from: 2.2 },
 ];
-
-export const SPLIT = {
-    duration: 1.15,
-    /** Momento en que las gotas ya están separadas (relevo al navbar). */
-    handoff: 0.95,
-    /** Separación entre gotas, en radios. */
-    spacing: 1.5,
-    /** Movimiento reducido: se desvanece sin dividirse. */
-    reducedDuration: 0.35,
-};
 
 const NOMINAL = 2.9;
 
@@ -351,67 +338,4 @@ export function streamFrame(t: number, ctx: EmergeContext): KaiEmergePhase {
     ctx.set('drift', smooth(2.3, 2.9, t));
 
     return streamPhaseAt(t);
-}
-
-/* ── División en cuatro gotas (hacia el navbar) ─────────────────────── */
-
-export const NAVBAR_COLORS = ['#a9c1d3', '#299244', '#519296', '#063547'];
-const SPLIT_R = 0.44;
-
-/** Posiciones de las gotas al terminar la división (radios, relativas). */
-export function splitTargets(): { x: number; y: number; r: number }[] {
-    return NAVBAR_COLORS.map((_, i) => ({
-        x: (i - 1.5) * SPLIT.spacing,
-        y: 0,
-        r: SPLIT_R,
-    }));
-}
-
-/** Un fotograma de la división. `t` en segundos reales. */
-export function splitFrame(t: number, ctx: EmergeContext): KaiEmergePhase {
-    const out = easeOut((t - 0.18) / 0.62, 2);
-    const spread = smooth(0.05, 0.35, t);
-    const cx = ctx.body.x;
-    const cy = ctx.body.y;
-
-    // El cuerpo se ensancha y se vacía del todo en las gotas.
-    ctx.mass(Math.sqrt(Math.max(0, 1 - out * 1.2)));
-    ctx.volume(1, 0);
-    ctx.set('sx', 1 + 0.45 * spread * (1 - out));
-    ctx.set('face', t < 0.3 ? 1 : 0);
-    ctx.set('closeL', smooth(0.05, 0.25, t));
-    ctx.set('closeR', smooth(0.05, 0.25, t));
-    ctx.set('bendL', 0.6);
-    ctx.set('bendR', 0.6);
-
-    splitTargets().forEach((p, i) => {
-        // Las gotas brotan desde dentro y se reparten; los puentes se afinan
-        // hasta romperse.
-        const k = 0.25 + 0.75 * out;
-        ctx.drop(i, {
-            x: cx + p.x * k,
-            y: cy + p.y,
-            r: p.r * Math.sqrt(smooth(0, 0.4, t) * 0.4 + out * 0.6),
-            stretch: 1 + 0.25 * (1 - out) * spread,
-            angle: 0,
-            glass: smooth(0.6, 0.95, t),
-            color: NAVBAR_COLORS[i],
-        });
-    });
-
-    ctx.presence(1);
-
-    return 'split';
-}
-
-/** Movimiento reducido: KAI se desvanece en su sitio. `t` en segundos reales. */
-export function splitReducedFrame(
-    t: number,
-    ctx: EmergeContext,
-): KaiEmergePhase {
-    ctx.mass(1);
-    ctx.volume(1, 0);
-    ctx.presence(1 - smooth(0, SPLIT.reducedDuration, t));
-
-    return 'split';
 }

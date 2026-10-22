@@ -1,33 +1,38 @@
 /**
- * Llegada a Kiub: las cuatro gotas en que se divide KAI viajan, una tras
- * otra, hasta la posición del navbar. La primera se aplana y es la primera
- * sección del vidrio; las demás se unen a su extremo hasta completar la
- * cápsula. Cada unión deforma el borde y deja un destello de su color que
- * se reparte por el interior y el contorno.
+ * Llegada a Kiub: KAI choca contra el navbar desde abajo y su líquido se
+ * extiende hasta ser la barra.
+ *
+ * Al impacto el cuerpo se aplasta contra el techo, la masa corre hacia los
+ * dos lados con un frente que se abomba y rebota (elástico), cuelgan un
+ * par de gotas que se recogen y saltan unas pocas gotitas. Un destello de
+ * luz y una onda marcan el choque; los ojos de KAI sonríen un instante en
+ * la barra. Después el color de KAI se vuelve el vidrio del navbar, un
+ * brillo lo recorre y la barra real toma el relevo: primero sus controles,
+ * luego el contenido. La estela blanca se recoge hacia el punto de choque.
  *
  * Vive fuera de Vue (una capa sobre `<body>`) para sobrevivir al cambio de
  * página: el inicio de sesión la lanza, Inertia monta el destino debajo de
- * un fondo opaco y `AppHeader` muestra la barra real cuando la cápsula está
- * completa (evento `kiub:navbar-ready`). Después aparecen los controles y,
- * al final, el contenido.
+ * un fondo opaco y `AppHeader` muestra la barra real cuando está formada
+ * (evento `kiub:navbar-ready`).
  */
 
 import { BINS, traceField } from './field';
 import type { Ball } from './field';
-import { NAVBAR_COLORS } from './stream';
+import { KAI_DEFAULT_COLORS } from './palette';
+import { drawRibbon, ribbonLength, trimRibbon } from './ribbon';
+import type { RibbonPoint } from './ribbon';
 
 export const ARRIVAL = {
-    /** Vuelo de cada gota hasta su sitio (s). */
-    flight: 0.62,
-    /** Retraso entre gotas (s). */
-    stagger: 0.24,
-    /** Aplanado / unión elástica de cada sección (s). */
-    merge: 0.46,
-    /** Destello de color al unirse (s). */
-    flash: 0.7,
-    /** Pausa con la cápsula completa antes de entregar la barra real (s). */
-    hold: 0.12,
-    /** Fundido de la cápsula a la barra real (s). */
+    /** El líquido corre hasta los extremos de la barra (s). */
+    spread: 0.72,
+    /** Del color de KAI al vidrio del navbar: comienzo y duración (s). */
+    glassAt: 0.5,
+    glass: 0.45,
+    /** La estela se recoge hacia el choque (s). */
+    trail: 0.3,
+    /** Entrega a la barra real (s desde el choque). */
+    handoffAt: 1.12,
+    /** Fundido de la capa a la barra real (s). */
     handoff: 0.32,
     /** El contenido aparece después de los controles (s tras la entrega). */
     contentDelay: 0.42,
@@ -36,13 +41,16 @@ export const ARRIVAL = {
 
 export const NAVBAR_READY_EVENT = 'kiub:navbar-ready';
 
-export type ArrivalDrop = { x: number; y: number; r: number; color?: string };
+/** Dónde y con qué tamaño llega KAI (px de pantalla). */
+export type ArrivalImpact = { x: number; y: number; r: number };
 
 export type ArrivalOptions = {
-    /** Gotas al empezar (px de pantalla), en orden de izquierda a derecha. */
-    drops: ArrivalDrop[];
     /** Color del fondo de la página de origen: el telón empieza igual. */
     background: string;
+    /** Sin impacto (movimiento reducido): la barra aparece con un fundido. */
+    impact?: ArrivalImpact;
+    /** Estela blanca en el momento del choque (cabeza primero). */
+    trail?: RibbonPoint[];
     reduced?: boolean;
 };
 
@@ -129,12 +137,6 @@ function smooth(u: number): number {
     return x * x * (3 - 2 * x);
 }
 
-function easeInOut(u: number): number {
-    const x = clamp01(u);
-
-    return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-}
-
 /** Muelle subamortiguado de 0 a 1: pasa un poco y vuelve (elástico). */
 function elastic(u: number): number {
     const x = clamp01(u);
@@ -173,16 +175,6 @@ function set(node: Element, attrs: Record<string, string | number>): void {
     }
 }
 
-/** Mezcla un color #rrggbb con blanco (`k` 0-1). */
-function lighten(hex: string, k: number): string {
-    const n = parseInt(hex.slice(1), 16);
-    const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) =>
-        Math.round(v + (255 - v) * k),
-    );
-
-    return `rgb(${c.join(',')})`;
-}
-
 let active: { cancel: () => void } | null = null;
 let quiet: HTMLStyleElement | null = null;
 
@@ -209,13 +201,27 @@ function endDeparture(): void {
     quiet = null;
 }
 
+/** Rectángulo redondeado como trazado (para cerrar con la forma real). */
+function roundRect(b: BarRect, rx: number): string {
+    const r = Math.min(rx, b.height / 2, b.width / 2);
+    const x = b.left;
+    const y = b.top;
+    const w = b.width;
+    const h = b.height;
+
+    return `M${x + r} ${y}H${x + w - r}A${r} ${r} 0 0 1 ${x + w} ${y + r}V${y + h - r}A${r} ${r} 0 0 1 ${x + w - r} ${y + h}H${x + r}A${r} ${r} 0 0 1 ${x} ${y + h - r}V${y + r}A${r} ${r} 0 0 1 ${x + r} ${y}Z`;
+}
+
+type Droplet = { x: number; y: number; vx: number; vy: number; r: number };
+
 /**
- * Forma el navbar con las gotas. Se resuelve cuando todo terminó (capa
- * retirada y contenido visible). Llamarla de nuevo cancela la anterior.
+ * Forma el navbar con el choque de KAI. Se resuelve cuando todo terminó
+ * (capa retirada y contenido visible). Llamarla de nuevo cancela la anterior.
  */
 export function playArrival({
-    drops,
     background,
+    impact,
+    trail = [],
     reduced = false,
 }: ArrivalOptions): Promise<void> {
     active?.cancel();
@@ -241,134 +247,155 @@ export function playArrival({
         pointerEvents: 'none',
     });
 
+    // La estela, debajo de la barra.
+    const canvas = document.createElement('canvas');
+    Object.assign(canvas.style, {
+        position: 'absolute',
+        inset: '0',
+        width: '100%',
+        height: '100%',
+    });
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(window.innerWidth * dpr);
+    canvas.height = Math.round(window.innerHeight * dpr);
+    const ctx = canvas.getContext('2d');
+
     const svg = el('svg', { width: '100%', height: '100%' });
-    svg.style.overflow = 'visible';
-    svg.style.display = 'block';
-    const defs = el('defs');
+    Object.assign(svg.style, {
+        position: 'absolute',
+        inset: '0',
+        overflow: 'visible',
+    });
     const uid = Math.random().toString(36).slice(2, 8);
-    const clipId = `kiub-arrival-clip-${uid}`;
-    const glassId = `kiub-arrival-glass-${uid}`;
-    const path = el('path', { id: `kiub-arrival-shape-${uid}`, d: 'M0 0' });
-    const clip = el('clipPath', { id: clipId });
-    clip.appendChild(el('use', { href: `#${path.id}` }));
-    const glass = el('linearGradient', {
-        id: glassId,
+    const id = (name: string) => `kiub-arrival-${name}-${uid}`;
+    const defs = el('defs');
+    const path = el('path', { id: id('shape'), d: 'M0 0' });
+    const clip = el('clipPath', { id: id('clip') });
+    clip.appendChild(el('use', { href: `#${id('shape')}` }));
+
+    const c = KAI_DEFAULT_COLORS;
+    const kaiFill = el('radialGradient', {
+        id: id('kai'),
+        gradientUnits: 'userSpaceOnUse',
+    });
+    kaiFill.append(
+        el('stop', { offset: 0, 'stop-color': '#eef4ff' }),
+        el('stop', { offset: 0.1, 'stop-color': '#a9c8ff' }),
+        el('stop', { offset: 0.42, 'stop-color': c.primary }),
+        el('stop', { offset: 0.78, 'stop-color': c.accent }),
+        el('stop', { offset: 1, 'stop-color': '#b6a5ff' }),
+    );
+    const glassFill = el('linearGradient', {
+        id: id('glass'),
         x1: 0,
         y1: 0,
         x2: 0,
         y2: 1,
     });
-    glass.append(
-        el('stop', { offset: 0, 'stop-color': 'rgb(246,248,251)' }),
-        el('stop', { offset: 1, 'stop-color': 'rgb(226,232,240)' }),
+    glassFill.append(
+        el('stop', { offset: 0, 'stop-color': 'rgb(244,246,250)' }),
+        el('stop', { offset: 1, 'stop-color': 'rgb(226,231,239)' }),
     );
-    defs.append(path, clip, glass);
-
-    const colors = drops.map(
-        (d, i) => d.color || NAVBAR_COLORS[i % NAVBAR_COLORS.length],
+    const glow = el('radialGradient', { id: id('glow') });
+    glow.append(
+        el('stop', { offset: 0, 'stop-color': '#ffffff', 'stop-opacity': 1 }),
+        el('stop', {
+            offset: 0.4,
+            'stop-color': '#ffffff',
+            'stop-opacity': 0.45,
+        }),
+        el('stop', { offset: 1, 'stop-color': '#ffffff', 'stop-opacity': 0 }),
     );
-    const dropGradients = colors.map((color, i) => {
-        const g = el('radialGradient', {
-            id: `kiub-arrival-drop-${uid}-${i}`,
-            cx: 0.38,
-            cy: 0.32,
-            r: 0.78,
-        });
-        g.append(
-            el('stop', { offset: 0, 'stop-color': lighten(color, 0.55) }),
-            el('stop', { offset: 0.62, 'stop-color': color }),
-            el('stop', {
-                offset: 1,
-                'stop-color': color,
-                'stop-opacity': 0.92,
-            }),
-        );
-        defs.appendChild(g);
-
-        return g.id;
-    });
-    const flashGradients = colors.map((color, i) => {
-        const g = el('radialGradient', {
-            id: `kiub-arrival-flash-${uid}-${i}`,
-        });
-        g.append(
-            el('stop', {
-                offset: 0,
-                'stop-color': color,
-                'stop-opacity': 0.85,
-            }),
-            el('stop', {
-                offset: 0.55,
-                'stop-color': color,
-                'stop-opacity': 0.35,
-            }),
-            el('stop', { offset: 1, 'stop-color': color, 'stop-opacity': 0 }),
-        );
-        defs.appendChild(g);
-
-        return g.id;
-    });
-    // Tinte de KAI: al recibirlas, las gotas aún llevan su azul violáceo y
-    // lo pierden en el primer tramo del vuelo (continuidad de material).
-    const kaiTintId = `kiub-arrival-kai-${uid}`;
-    const kaiTint = el('radialGradient', {
-        id: kaiTintId,
-        cx: 0.4,
-        cy: 0.34,
-        r: 0.8,
-    });
-    kaiTint.append(
-        el('stop', { offset: 0, 'stop-color': '#b9c8ff' }),
-        el('stop', { offset: 0.6, 'stop-color': '#7f8cff' }),
-        el('stop', { offset: 1, 'stop-color': '#6a6ff2' }),
+    const sheen = el('linearGradient', { id: id('sheen'), x1: 0, x2: 1 });
+    sheen.append(
+        el('stop', { offset: 0, 'stop-color': '#ffffff', 'stop-opacity': 0 }),
+        el('stop', {
+            offset: 0.5,
+            'stop-color': '#ffffff',
+            'stop-opacity': 0.75,
+        }),
+        el('stop', { offset: 1, 'stop-color': '#ffffff', 'stop-opacity': 0 }),
     );
-    defs.appendChild(kaiTint);
+    defs.append(path, clip, kaiFill, glassFill, glow, sheen);
     svg.appendChild(defs);
 
     const group = el('g');
     group.style.filter =
         'drop-shadow(0 12px 22px rgba(5, 25, 36, 0.16)) drop-shadow(0 2px 4px rgba(5, 25, 36, 0.08))';
-    const body = el('use', { href: `#${path.id}`, fill: `url(#${glassId})` });
-    const inner = el('g', { 'clip-path': `url(#${clipId})` });
-    const dropEls = colors.map((_, i) =>
-        el('ellipse', { fill: `url(#${dropGradients[i]})`, rx: 0, ry: 0 }),
-    );
-    const flashEls = colors.map((_, i) =>
-        el('circle', { fill: `url(#${flashGradients[i]})`, r: 0, opacity: 0 }),
-    );
-    const tintEls = colors.map(() =>
-        el('ellipse', { fill: `url(#${kaiTintId})`, rx: 0, ry: 0 }),
-    );
-    const shine = colors.map(() =>
-        el('ellipse', { fill: '#ffffff', opacity: 0, rx: 0, ry: 0 }),
-    );
-    inner.append(...flashEls, ...dropEls, ...tintEls, ...shine);
-    const edge = el('use', {
-        href: `#${path.id}`,
-        fill: 'none',
-        stroke: 'rgba(255,255,255,0.85)',
-        'stroke-width': 1.2,
+    const kaiBody = el('use', {
+        href: `#${id('shape')}`,
+        fill: `url(#${id('kai')})`,
     });
-    const edgeFlashes = colors.map((color) =>
-        el('use', {
-            href: `#${path.id}`,
-            fill: 'none',
-            stroke: color,
-            'stroke-width': 2.2,
-            opacity: 0,
-        }),
+    const glassBody = el('use', {
+        href: `#${id('shape')}`,
+        fill: `url(#${id('glass')})`,
+        opacity: 0,
+    });
+    const inner = el('g', { 'clip-path': `url(#${id('clip')})` });
+    const flash = el('circle', { fill: `url(#${id('glow')})`, r: 0 });
+    const sweep = el('rect', {
+        fill: `url(#${id('sheen')})`,
+        width: 0,
+        height: 0,
+        opacity: 0,
+    });
+    // Reflejo superior: el vidrio (o el líquido) recibe la luz desde arriba.
+    const rim = el('rect', { fill: '#ffffff', opacity: 0.55, height: 1.5 });
+    inner.append(flash, sweep, rim);
+    const edge = el('use', {
+        href: `#${id('shape')}`,
+        fill: 'none',
+        stroke: 'rgba(255,255,255,0.8)',
+        'stroke-width': 1,
+    });
+    // Los ojos de KAI sonríen un instante en la barra («◠ ◠»).
+    const eyes = el('path', {
+        fill: 'none',
+        stroke: '#ffffff',
+        'stroke-width': 2.6,
+        'stroke-linecap': 'round',
+        opacity: 0,
+    });
+    group.append(kaiBody, glassBody, inner, edge, eyes);
+
+    const ring = el('ellipse', {
+        fill: 'none',
+        stroke: c.primary,
+        'stroke-width': 1.5,
+        opacity: 0,
+    });
+    const dropletEls = Array.from({ length: 6 }, () =>
+        el('circle', { fill: c.primary, r: 0, opacity: 0 }),
     );
-    group.append(body, inner, edge, ...edgeFlashes);
-    svg.appendChild(group);
-    layer.appendChild(svg);
+    svg.append(ring, group, ...dropletEls);
+    layer.append(canvas, svg);
     document.body.append(backdrop, layer);
 
     let frame = 0;
     let finished = false;
-    const start = performance.now();
+    let last = performance.now();
+    const start = last;
     const zeros = new Float64Array(BINS);
-    let bar = measureBar();
     let readyAt = Infinity;
+    const trailLength = ribbonLength(trail);
+
+    // Gotitas del choque: pocas, pequeñas y hacia los lados.
+    const droplets: Droplet[] = impact
+        ? [
+              [-1, 0.55, -0.35],
+              [-1, 0.85, 0.15],
+              [-1, 0.4, 0.5],
+              [1, 0.6, -0.3],
+              [1, 0.95, 0.2],
+              [1, 0.45, 0.55],
+          ].map(([side, speed, lift], i) => ({
+              x: impact.x + side * impact.r * 0.4,
+              y: impact.y - impact.r * 0.1,
+              vx: side * (180 + 260 * speed),
+              vy: -120 * (1 - lift) + 80 * lift,
+              r: 2.2 + (i % 3) * 1.1,
+          }))
+        : [];
 
     return new Promise<void>((resolve) => {
         const finish = () => {
@@ -396,207 +423,202 @@ export function playArrival({
             },
         };
 
-        const n = drops.length;
-        const lastJoin =
-            ARRIVAL.flight + (n - 1) * ARRIVAL.stagger + ARRIVAL.merge;
-        const handoffAt = reduced ? 0.05 : lastJoin + ARRIVAL.hold;
+        const handoffAt = reduced || !impact ? 0.05 : ARRIVAL.handoffAt;
 
         const tick = (now: number) => {
             const t = (now - start) / 1000;
+            const dt = Math.min(0.05, (now - last) / 1000);
+            last = now;
             // La barra real aparece al montarse el destino: se sigue su sitio.
-            bar = measureBar();
+            const bar = measureBar();
             const h = bar.height;
-            const cy = bar.top + h / 2;
             const capR = h / 2;
-            const left = bar.left + capR;
-            const sectionEnd = (k: number) =>
-                bar.left +
-                (bar.width * (k + 1)) / n -
-                capR * (k === n - 1 ? 1 : 0.35);
-            const balls: Ball[] = [];
-            let barEnd = -Infinity;
-            let barStart = -Infinity;
-            let barR = 0;
+            const cy = bar.top + capR;
 
-            if (!reduced) {
-                drops.forEach((drop, k) => {
-                    const depart = k * ARRIVAL.stagger * 0.45;
-                    const arrive = ARRIVAL.flight + k * ARRIVAL.stagger;
-                    // Punto de unión: el centro de su sección (la primera) o
-                    // el extremo actual de la cápsula (las demás).
-                    const jx =
-                        k === 0
-                            ? bar.left + bar.width / (2 * n)
-                            : bar.left + (bar.width * k) / n + capR * 0.2;
-                    const u = easeInOut((t - depart) / (arrive - depart));
-                    // Vuelo con una curva suave por debajo de la barra.
-                    const swoop = Math.sin(Math.PI * clamp01(u)) * h * 0.55;
-                    const x = mix(drop.x, jx, u);
-                    const y = mix(drop.y, cy, u) + swoop;
-                    const merge = clamp01((t - arrive) / ARRIVAL.merge);
-                    const r =
-                        mix(drop.r, capR * 0.92, smooth(u)) *
-                        (1 - smooth(merge * 1.25));
+            if (impact && !reduced) {
+                // Estela: se recoge desde la cola hacia el choque.
+                if (ctx) {
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    const k = 1 - smooth(t / ARRIVAL.trail);
 
-                    // Velocidad aproximada: se alarga en la dirección del vuelo.
-                    const du = 0.02;
-                    const u2 = easeInOut((t + du - depart) / (arrive - depart));
-                    const vx = (mix(drop.x, jx, u2) - x) / du;
-                    const vy =
-                        (mix(drop.y, cy, u2) +
-                            Math.sin(Math.PI * clamp01(u2)) * h * 0.55 -
-                            y) /
-                        du;
-                    const speed = Math.hypot(vx, vy);
-                    const stretch = 1 + Math.min(0.55, speed / 2600);
-                    const angle = Math.atan2(vy, vx);
-
-                    if (r > 0.6) {
-                        balls.push({
-                            x,
-                            y,
-                            r,
-                            stretch: stretch > 1.01 ? stretch : undefined,
-                            c: Math.cos(angle),
-                            s: Math.sin(angle),
-                        });
+                    if (k > 0 && trail.length > 1) {
+                        drawRibbon(ctx, trimRibbon(trail, trailLength * k));
                     }
+                }
 
-                    // Tinte de la gota (y su brillo) mientras es una gota.
-                    const sx = r * Math.sqrt(stretch) * 1.02;
-                    const sy = (r / Math.sqrt(stretch)) * 1.02;
-                    set(dropEls[k], {
-                        cx: x.toFixed(1),
-                        cy: y.toFixed(1),
-                        rx: Math.max(0, sx).toFixed(1),
-                        ry: Math.max(0, sy).toFixed(1),
-                        transform: `rotate(${((angle * 180) / Math.PI).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})`,
-                        opacity: (0.95 * (1 - smooth(merge * 1.4))).toFixed(3),
+                const ex = impact.x;
+                const ey = cy;
+                const leftEnd = bar.left + capR;
+                const rightEnd = bar.left + bar.width - capR;
+                const spread = elastic((t - 0.03) / ARRIVAL.spread);
+                // El rebote del extremo no se sale del sitio de la barra.
+                const xl = Math.max(
+                    leftEnd - capR * 0.18,
+                    mix(ex, leftEnd, spread),
+                );
+                const xr = Math.min(
+                    rightEnd + capR * 0.18,
+                    mix(ex, rightEnd, spread),
+                );
+                const jiggle = 1 + 0.08 * Math.exp(-5 * t) * Math.sin(t * 20);
+                const barR = capR * mix(0.62, 1, smooth(t / 0.16)) * jiggle;
+                const balls: Ball[] = [];
+
+                // El cuerpo se aplasta contra el techo y se vacía en la barra.
+                const body = impact.r * (1 - smooth((t - 0.03) / 0.3));
+
+                if (body > 0.8) {
+                    balls.push({
+                        x: ex,
+                        y: ey + h * 0.12 - h * 0.18 * smooth(t / 0.1),
+                        r: body,
+                        stretch: 1 + 0.85 * smooth(t / 0.12),
+                        c: 1,
+                        s: 0,
                     });
-                    const handover = 1 - smooth(t / 0.45);
-                    set(tintEls[k], {
-                        cx: x.toFixed(1),
-                        cy: y.toFixed(1),
-                        rx: Math.max(0, sx).toFixed(1),
-                        ry: Math.max(0, sy).toFixed(1),
-                        transform: `rotate(${((angle * 180) / Math.PI).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})`,
-                        opacity: (0.3 * handover).toFixed(3),
-                    });
-                    set(shine[k], {
-                        cx: (x - r * 0.32).toFixed(1),
-                        cy: (y - r * 0.38).toFixed(1),
-                        rx: (r * 0.34).toFixed(1),
-                        ry: (r * 0.2).toFixed(1),
-                        opacity: (
-                            0.55 *
-                            (1 - handover) *
-                            (1 - smooth(merge * 1.6))
-                        ).toFixed(3),
-                    });
+                }
 
-                    // La cápsula: la primera gota se aplana; cada una que
-                    // llega la alarga hasta su sección, con rebote.
-                    if (t >= arrive) {
-                        const e = elastic(merge);
-
-                        if (k === 0) {
-                            barStart = mix(jx, left, e);
-                            barEnd = Math.max(
-                                barEnd,
-                                mix(jx, sectionEnd(0), e),
-                            );
-                            barR = mix(drop.r * 0.9, capR, smooth(merge * 1.4));
-                        } else {
-                            // La última no se pasa del borde de la barra.
-                            const reach = mix(
-                                sectionEnd(k - 1),
-                                sectionEnd(k),
-                                e,
-                            );
-                            barEnd = Math.max(
-                                barEnd,
-                                k === n - 1
-                                    ? Math.min(
-                                          reach,
-                                          sectionEnd(k) + capR * 0.12,
-                                      )
-                                    : reach,
-                            );
-                        }
-
-                        // Destello del color de la gota: interior y borde.
-                        const f = clamp01((t - arrive) / ARRIVAL.flash);
-                        set(flashEls[k], {
-                            cx: jx.toFixed(1),
-                            cy: cy.toFixed(1),
-                            r: (bar.width * 0.36 * smooth(f * 1.3) + 1).toFixed(
-                                1,
-                            ),
-                            opacity: (
-                                Math.sin(Math.PI * Math.pow(f, 0.6)) * 0.62
-                            ).toFixed(3),
-                        });
-                        set(edgeFlashes[k], {
-                            opacity: (
-                                Math.sin(Math.PI * Math.pow(f, 0.5)) * 0.75
-                            ).toFixed(3),
-                        });
-                    }
+                balls.push({
+                    x: xl,
+                    y: ey,
+                    x2: Math.max(xl + 0.1, xr),
+                    y2: ey,
+                    r: barR,
                 });
 
-                if (barEnd > -Infinity) {
-                    // Al unirse, la sección se hincha un poco y vuelve.
-                    let swell = 0;
+                // Frentes del líquido: se abomban mientras corren.
+                const front = barR * 0.92 * (1 - smooth((t - 0.18) / 0.45));
 
-                    drops.forEach((_, k) => {
-                        const since =
-                            t - (ARRIVAL.flight + k * ARRIVAL.stagger);
-
-                        if (since > 0 && since < 0.5) {
-                            swell = Math.max(
-                                swell,
-                                Math.sin((since / 0.5) * Math.PI) * 0.07,
-                            );
-                        }
-                    });
-
-                    balls.push({
-                        x: barStart,
-                        y: cy,
-                        x2: Math.max(barStart + 0.1, barEnd),
-                        y2: cy,
-                        r: barR * (1 + swell),
-                    });
-                }
-            }
-
-            // El borde de vidrio aparece al separarse de KAI.
-            edge.setAttribute('opacity', smooth(t / 0.4).toFixed(3));
-
-            if (balls.length) {
-                let minX = Infinity;
-                let minY = Infinity;
-                let maxX = -Infinity;
-                let maxY = -Infinity;
-
-                for (const b of balls) {
-                    const span = b.r * 1.7 * Math.max(1, b.stretch ?? 1);
-                    minX = Math.min(minX, b.x - span, (b.x2 ?? b.x) - span);
-                    maxX = Math.max(maxX, b.x + span, (b.x2 ?? b.x) + span);
-                    minY = Math.min(minY, b.y - span);
-                    maxY = Math.max(maxY, b.y + span);
+                if (front > 0.8) {
+                    balls.push(
+                        { x: xl, y: ey, r: front },
+                        { x: xr, y: ey, r: front },
+                    );
                 }
 
-                const traced = traceField(
-                    { cx: minX - 1000, cy: minY - 1000, radii: zeros },
-                    balls,
-                    [minX, minY, maxX, maxY],
-                    { cell: 3, decimals: 1 },
+                // Dos gotas cuelgan un momento bajo la barra y se recogen.
+                for (const [offset, at] of [
+                    [-0.17, 0.2],
+                    [0.23, 0.26],
+                ]) {
+                    const dx = offset * bar.width;
+                    const u = clamp01((t - at) / 0.55);
+                    const hang = Math.sin(Math.PI * u) * 11;
+
+                    if (u > 0 && u < 1 && ex + dx > xl && ex + dx < xr) {
+                        balls.push({
+                            x: ex + dx,
+                            y: bar.top + h + hang - 4,
+                            r: 5.5 * Math.sin(Math.PI * Math.min(1, u * 1.4)),
+                        });
+                    }
+                }
+
+                // Al asentarse, la forma termina siendo la de la barra real.
+                const settle = clamp01((t - 0.86) / 0.3);
+
+                if (settle > 0) {
+                    path.setAttribute(
+                        'd',
+                        roundRect(bar, mix(capR, bar.radius, smooth(settle))),
+                    );
+                } else {
+                    let minX = Infinity;
+                    let minY = Infinity;
+                    let maxX = -Infinity;
+                    let maxY = -Infinity;
+
+                    for (const b of balls) {
+                        const span = b.r * 1.7 * Math.max(1, b.stretch ?? 1);
+                        minX = Math.min(minX, b.x - span, (b.x2 ?? b.x) - span);
+                        maxX = Math.max(maxX, b.x + span, (b.x2 ?? b.x) + span);
+                        minY = Math.min(minY, b.y - span);
+                        maxY = Math.max(maxY, b.y + span);
+                    }
+
+                    const traced = traceField(
+                        { cx: minX - 1000, cy: minY - 1000, radii: zeros },
+                        balls,
+                        [minX, minY, maxX, maxY],
+                        { cell: 3, decimals: 1 },
+                    );
+                    path.setAttribute('d', traced.path || 'M0 0');
+                }
+
+                // Del color de KAI al vidrio del navbar.
+                const glassK = smooth((t - ARRIVAL.glassAt) / ARRIVAL.glass);
+                kaiFill.setAttribute('cx', String(ex));
+                kaiFill.setAttribute('cy', String(ey));
+                kaiFill.setAttribute(
+                    'r',
+                    String(Math.max(40, (xr - xl) * 0.55 + capR)),
                 );
-                path.setAttribute('d', traced.path || 'M0 0');
+                set(kaiBody, { opacity: (1 - glassK).toFixed(3) });
+                set(glassBody, { opacity: glassK.toFixed(3) });
+
+                // Destello del choque y onda.
+                const f = clamp01((t - 0.03) / 0.45);
+                set(flash, {
+                    cx: ex,
+                    cy: ey,
+                    r: (20 + 220 * smooth(f)).toFixed(1),
+                    opacity: (t < 0.03 ? 0 : 0.9 * (1 - smooth(f))).toFixed(3),
+                });
+                const w = clamp01(t / 0.6);
+                set(ring, {
+                    cx: ex,
+                    cy: ey,
+                    rx: (impact.r + 220 * smooth(w)).toFixed(1),
+                    ry: (impact.r * 0.6 + 26 * smooth(w)).toFixed(1),
+                    opacity: (0.55 * (1 - smooth(w))).toFixed(3),
+                });
+
+                // Brillo que recorre la barra ya formada.
+                const s = clamp01((t - 0.78) / 0.55);
+                set(sweep, {
+                    x: (bar.left - 220 + (bar.width + 440) * smooth(s)).toFixed(
+                        1,
+                    ),
+                    y: bar.top,
+                    width: 220,
+                    height: h,
+                    opacity: (Math.sin(Math.PI * s) * 0.8).toFixed(3),
+                });
+                set(rim, {
+                    x: Math.min(xl, xr) - capR * 0.5,
+                    y: bar.top + 1.5,
+                    width: Math.max(0, xr - xl + capR),
+                });
+
+                // Ojos «◠ ◠»: aparecen al chocar y se desvanecen.
+                const e = clamp01(t / 0.9);
+                const eo = 1 - smooth((e - 0.45) / 0.45);
+                const gap = Math.min(10, h * 0.16);
+                const ew = Math.min(6, h * 0.1);
+                const eyY = ey - 2;
+                set(eyes, {
+                    d: `M${ex - gap - ew} ${eyY}q${ew} ${-ew * 1.1} ${ew * 2} 0M${ex + gap - ew} ${eyY}q${ew} ${-ew * 1.1} ${ew * 2} 0`,
+                    opacity: eo.toFixed(3),
+                });
+
+                // Gotitas: salen despedidas, caen y se desvanecen.
+                droplets.forEach((d, i) => {
+                    d.vy += 1100 * dt;
+                    d.x += d.vx * dt;
+                    d.y += d.vy * dt;
+                    d.vx *= 1 - 1.6 * dt;
+                    const life = clamp01(t / (0.62 + (i % 3) * 0.1));
+                    set(dropletEls[i], {
+                        cx: d.x.toFixed(1),
+                        cy: d.y.toFixed(1),
+                        r: (d.r * (1 - 0.6 * life)).toFixed(2),
+                        opacity: (0.9 * (1 - smooth(life))).toFixed(3),
+                    });
+                });
             }
 
-            // Entrega: la barra real aparece debajo y la cápsula se funde.
+            // Entrega: la barra real aparece debajo y la capa se funde.
             if (t >= handoffAt && readyAt === Infinity) {
                 readyAt = t;
                 announceReady();
@@ -605,15 +627,15 @@ export function playArrival({
             if (readyAt < Infinity) {
                 const k = clamp01((t - readyAt) / ARRIVAL.handoff);
                 layer.style.opacity = String(1 - smooth(k));
-                const c = clamp01(
+                const cf = clamp01(
                     (t - readyAt - (reduced ? 0 : ARRIVAL.contentDelay)) /
                         (reduced ? 0.25 : ARRIVAL.contentFade),
                 );
-                backdrop.style.opacity = String(1 - smooth(c));
+                backdrop.style.opacity = String(1 - smooth(cf));
                 // Ya no bloquea: el contenido es usable mientras se descubre.
-                backdrop.style.pointerEvents = c > 0 ? 'none' : 'auto';
+                backdrop.style.pointerEvents = cf > 0 ? 'none' : 'auto';
 
-                if (c >= 1 && k >= 1) {
+                if (cf >= 1 && k >= 1) {
                     finish();
 
                     return;
@@ -623,7 +645,9 @@ export function playArrival({
             frame = requestAnimationFrame(tick);
         };
 
-        frame = requestAnimationFrame(tick);
+        // El primer fotograma se dibuja ya: el telón no tapa a KAI ni un
+        // instante sin que la capa lo haya sustituido.
+        tick(start);
     });
 }
 

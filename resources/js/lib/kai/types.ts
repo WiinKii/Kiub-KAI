@@ -68,11 +68,10 @@ export type KaiTrackOptions = {
 };
 
 /**
- * Coreografías de aparición: «Convergencia» (gotas que se funden),
- * «Corriente» (un cuerpo de agua que entra, se pliega y despierta) y
- * «División» (KAI se reparte en cuatro gotas de color y desaparece).
+ * Coreografías de aparición: «Convergencia» (gotas que se funden) y
+ * «Corriente» (un cuerpo de agua que entra, se pliega y despierta).
  */
-export type KaiEmergeKind = 'converge' | 'stream' | 'split';
+export type KaiEmergeKind = 'converge' | 'stream';
 
 /**
  * Fases de las apariciones. `gentle` es la variante de movimiento reducido
@@ -86,7 +85,6 @@ export type KaiEmergePhase =
     | 'fold'
     | 'awakening'
     | 'recognition'
-    | 'split'
     | 'gentle';
 
 export type KaiEmergeResult = {
@@ -122,8 +120,7 @@ export type KaiController = {
     point: (dir: KaiGaze | null) => void;
     /**
      * Aparición: por defecto «Convergencia» (gotas que se funden y
-     * despierta); `'stream'` es la corriente del inicio de sesión y
-     * `'split'` la división en cuatro gotas (KAI queda oculto al terminar).
+     * despierta); `'stream'` es la corriente del inicio de sesión.
      * Llamarla de nuevo reinicia; se resuelve al terminar o al cancelarse.
      * Las peticiones de estado y gesto durante la aparición se guardan (la
      * última de cada tipo) y se aplican al terminar.
