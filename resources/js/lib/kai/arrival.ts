@@ -184,6 +184,30 @@ function lighten(hex: string, k: number): string {
 }
 
 let active: { cancel: () => void } | null = null;
+let quiet: HTMLStyleElement | null = null;
+
+/**
+ * Desde que KAI sale hacia el navbar, el viaje es el indicador de progreso:
+ * se oculta la barra de carga de Inertia hasta que termina la llegada.
+ */
+export function beginDeparture(): void {
+    if (!quiet) {
+        quiet = document.createElement('style');
+        quiet.textContent = '#nprogress { display: none !important; }';
+        document.head.appendChild(quiet);
+        // Nunca para siempre: si la llegada no llega a empezar, vuelve.
+        window.setTimeout(() => {
+            if (!pending) {
+                endDeparture();
+            }
+        }, 12000);
+    }
+}
+
+function endDeparture(): void {
+    quiet?.remove();
+    quiet = null;
+}
 
 /**
  * Forma el navbar con las gotas. Se resuelve cuando todo terminó (capa
@@ -284,6 +308,21 @@ export function playArrival({
 
         return g.id;
     });
+    // Tinte de KAI: al recibirlas, las gotas aún llevan su azul violáceo y
+    // lo pierden en el primer tramo del vuelo (continuidad de material).
+    const kaiTintId = `kiub-arrival-kai-${uid}`;
+    const kaiTint = el('radialGradient', {
+        id: kaiTintId,
+        cx: 0.4,
+        cy: 0.34,
+        r: 0.8,
+    });
+    kaiTint.append(
+        el('stop', { offset: 0, 'stop-color': '#b9c8ff' }),
+        el('stop', { offset: 0.6, 'stop-color': '#7f8cff' }),
+        el('stop', { offset: 1, 'stop-color': '#6a6ff2' }),
+    );
+    defs.appendChild(kaiTint);
     svg.appendChild(defs);
 
     const group = el('g');
@@ -297,10 +336,13 @@ export function playArrival({
     const flashEls = colors.map((_, i) =>
         el('circle', { fill: `url(#${flashGradients[i]})`, r: 0, opacity: 0 }),
     );
+    const tintEls = colors.map(() =>
+        el('ellipse', { fill: `url(#${kaiTintId})`, rx: 0, ry: 0 }),
+    );
     const shine = colors.map(() =>
         el('ellipse', { fill: '#ffffff', opacity: 0, rx: 0, ry: 0 }),
     );
-    inner.append(...flashEls, ...dropEls, ...shine);
+    inner.append(...flashEls, ...dropEls, ...tintEls, ...shine);
     const edge = el('use', {
         href: `#${path.id}`,
         fill: 'none',
@@ -338,6 +380,7 @@ export function playArrival({
             cancelAnimationFrame(frame);
             backdrop.remove();
             layer.remove();
+            endDeparture();
             pending = false;
             active = null;
             resolve();
@@ -430,12 +473,25 @@ export function playArrival({
                         transform: `rotate(${((angle * 180) / Math.PI).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})`,
                         opacity: (0.95 * (1 - smooth(merge * 1.4))).toFixed(3),
                     });
+                    const handover = 1 - smooth(t / 0.45);
+                    set(tintEls[k], {
+                        cx: x.toFixed(1),
+                        cy: y.toFixed(1),
+                        rx: Math.max(0, sx).toFixed(1),
+                        ry: Math.max(0, sy).toFixed(1),
+                        transform: `rotate(${((angle * 180) / Math.PI).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})`,
+                        opacity: (0.3 * handover).toFixed(3),
+                    });
                     set(shine[k], {
                         cx: (x - r * 0.32).toFixed(1),
                         cy: (y - r * 0.38).toFixed(1),
                         rx: (r * 0.34).toFixed(1),
                         ry: (r * 0.2).toFixed(1),
-                        opacity: (0.55 * (1 - smooth(merge * 1.6))).toFixed(3),
+                        opacity: (
+                            0.55 *
+                            (1 - handover) *
+                            (1 - smooth(merge * 1.6))
+                        ).toFixed(3),
                     });
 
                     // La cápsula: la primera gota se aplana; cada una que
@@ -513,6 +569,9 @@ export function playArrival({
                     });
                 }
             }
+
+            // El borde de vidrio aparece al separarse de KAI.
+            edge.setAttribute('opacity', smooth(t / 0.4).toFixed(3));
 
             if (balls.length) {
                 let minX = Infinity;

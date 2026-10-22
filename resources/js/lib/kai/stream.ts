@@ -298,12 +298,12 @@ export function streamFrame(t: number, ctx: EmergeContext): KaiEmergePhase {
     if (t > 1.45 && t < 1.6) {
         sx = 1 - 0.27 * el;
     } else if (t >= 1.6 && t < 1.78) {
-        sx = 1 + 0.17 * el;
+        sx = 1 + 0.1 * el;
     } else if (t >= 1.78 && t < 1.95) {
         sx = 1 - 0.05 * el;
     }
 
-    ctx.spring('sx', { w: 17, z: 0.42 });
+    ctx.spring('sx', { w: 16, z: 0.5 });
     ctx.set('sx', sx);
     ctx.set('wob', 1 + 0.9 * smooth(0.9, 1.2, t) * (1 - smooth(1.9, 2.5, t)));
 

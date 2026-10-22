@@ -59,7 +59,11 @@ actividad; al pulsarlo abre un chat guiado por sección, sin IA, y enseña los
 avisos en un globito) en `resources/js/components/kai/`, y su motor en
 `resources/js/lib/kai/`.
 Incluye una aparición, «Convergencia: KAI cobra vida», en la que las gotas se
-funden y KAI despierta. De momento solo se muestra en el laboratorio de
+funden y KAI despierta.
+La **pantalla de inicio de sesión** (`resources/js/pages/auth/Login.vue`) usa
+la autenticación real de Fortify y presenta a KAI: entra como una corriente que
+cobra vida, viaja al pasar por «Ingresar», se impulsa al enviar y, si el acceso
+es correcto, sube y se divide en cuatro gotas que forman el navbar. De momento solo se muestra en el laboratorio de
 desarrollo **`/dev/kai`** (aparición, colores, boca, rubor, juegos y todos los
 estados), que se registra únicamente
 en local (`routes/dev.php`, incluido desde `routes/web.php`).

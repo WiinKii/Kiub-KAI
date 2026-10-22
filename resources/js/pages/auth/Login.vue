@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import BareLayout from '@/layouts/BareLayout.vue';
+import { beginDeparture } from '@/lib/kai/arrival';
 /* @chisel-registration */
 import { register } from '@/routes';
 /* @end-chisel-registration */
@@ -146,6 +147,7 @@ onMounted(() => {
         }
 
         departing.value = true;
+        beginDeparture();
 
         await Promise.race([
             scene.value?.depart(BACKGROUND).catch(() => undefined),
