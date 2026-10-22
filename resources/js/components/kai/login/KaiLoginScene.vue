@@ -15,8 +15,12 @@
  * - `launch()`: se comprime y se impulsa; el entorno acelera y un pulso de
  *   luz recorre la estela (estado «Impulso»), lo que dure la validación.
  * - `fail()`: frena, recoge la estela y muestra el error junto al formulario.
- * - `depart()`: como al final de la referencia, acelera en su dirección y
- *   sale del recuadro; la estela pasa tras él y queda la galaxia.
+ * - `depart()`: como al final de la referencia, toma impulso, acelera en su
+ *   dirección hacia la cámara y sale del recuadro; la estela se queda un
+ *   instante y su cola la recorre hasta salir tras él; queda la galaxia.
+ *
+ * Mientras viaja nunca va quieto: flota, avanza sobre un muelle y, con el
+ * impulso, vibra apenas por la velocidad.
  *
  * Todo parte de la pose actual: entrar y salir del botón a medias continúa
  * desde donde está, sin reinicios.
@@ -46,6 +50,11 @@ const emit = defineEmits<{
 const HEADING = 0.55;
 /** Velocidades del entorno. */
 const SPEED = { rest: 0.35, travel: 1.3, rush: 2.1, depart: 3 };
+/**
+ * Muelle con el que KAI avanza un poco al viajar y se adelanta al
+ * impulsarse (px a tamaño 250): rigidez y amortiguación.
+ */
+const RIDE = { travel: 6, rush: 15, stiffness: 9, damping: 0.55 };
 /** Gestos espontáneos en reposo: cada cuánto (ms) y cuáles. */
 const MOOD_EVERY: [number, number] = [6500, 10500];
 /** Tras esta pausa sin escribir (ms), deja de mirar el campo. */
@@ -68,6 +77,7 @@ const root = ref<HTMLElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
 const trailCanvas = ref<HTMLCanvasElement | null>(null);
 const kaiBox = ref<HTMLElement | null>(null);
+const driftEl = ref<HTMLElement | null>(null);
 const kai = ref<KaiRef | null>(null);
 
 const prefersReduced = usePreferredReducedMotion();
@@ -107,6 +117,11 @@ let moodTimer: number | undefined;
 let moodBack: number | undefined;
 let launchedAt = 0;
 let heading = HEADING;
+/** Avance sobre el muelle (px), su velocidad y su objetivo. */
+let ride = 0;
+let rideVel = 0;
+let rideTarget = 0;
+let clock = 0;
 /** Radio de las esquinas del panel (recorte de la estela). */
 let panelRadius = 28;
 
@@ -132,8 +147,45 @@ function kaiHead() {
     return g ? { x: g.center.x, y: g.center.y, r: g.radius * 0.97 } : null;
 }
 
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/**
+ * Flotación del viaje: KAI nunca va quieto. Se mece con suavidad al viajar,
+ * vibra apenas con la velocidad del impulso y avanza sobre un muelle (con
+ * un pequeño retroceso al arrancar).
+ */
+function drift(dt: number) {
+    const el = driftEl.value;
+
+    if (!el) {
+        return;
+    }
+
+    clock += dt;
+    const speed = layers?.speed ?? 0;
+    const sway = clamp01((speed - SPEED.rest) / (SPEED.travel - SPEED.rest));
+    const shake = clamp01((speed - SPEED.travel) / (SPEED.rush - SPEED.travel));
+    const w = RIDE.stiffness;
+    rideVel +=
+        (w * w * (rideTarget - ride) - 2 * RIDE.damping * w * rideVel) * dt;
+    ride += rideVel * dt;
+
+    const k = size.value / 250;
+    const t = clock;
+    const x =
+        Math.cos(heading) * ride +
+        sway * 3 * Math.sin(t * 1.5) +
+        shake * 0.9 * Math.sin(t * 29);
+    const y =
+        Math.sin(heading) * ride +
+        sway * 4 * Math.sin(t * 2.05 + 0.8) +
+        shake * 0.9 * Math.sin(t * 23 + 1.3);
+    el.style.transform = `translate(${(x * k).toFixed(2)}px, ${(y * k).toFixed(2)}px)`;
+}
+
 function tick(dt: number) {
     layers?.frame(dt);
+    drift(Math.min(dt, 0.05));
 
     const rect = root.value?.getBoundingClientRect();
     trail?.frame(
@@ -280,6 +332,7 @@ function travel(on: boolean, target: Element | null = null) {
         }, 340);
         setState('travel');
         layers?.setSpeed(SPEED.travel);
+        rideTarget = RIDE.travel;
         // La estela sale tras el pequeño retroceso.
         window.setTimeout(() => {
             if (hovering && !busy) {
@@ -292,6 +345,7 @@ function travel(on: boolean, target: Element | null = null) {
         trail?.setAmount(0);
         setState(field ? fieldState() : 'idle');
         layers?.setSpeed(SPEED.rest);
+        rideTarget = 0;
     }
 }
 
@@ -312,11 +366,15 @@ function launch() {
     setHeading(HEADING);
     setState('rush');
     trail?.setRush(1);
-    // Tras la compresión, el entorno acelera y la estela sale.
+    // Se encoge hacia atrás (retroceso) y sale disparado hacia delante.
+    rideTarget = RIDE.rush;
+    rideVel = -240;
+    // Tras la compresión, el entorno acelera de golpe y la estela sale.
     window.setTimeout(() => {
         if (busy && !departing.value) {
             trail?.setAmount(1);
             layers?.setSpeed(SPEED.rush);
+            layers?.kick(2.6);
         }
     }, 120);
 }
@@ -328,6 +386,7 @@ function fail(target: Element | null = null) {
     trail?.setRush(0);
     trail?.setAmount(0);
     layers?.setSpeed(SPEED.rest);
+    rideTarget = 0;
     setState('idle');
     window.clearTimeout(errorTimer);
     errorTimer = window.setTimeout(() => {
@@ -453,23 +512,40 @@ async function depart(): Promise<void> {
         uy > 0 ? (panel.bottom - head.y) / uy : (panel.top - head.y) / uy;
     const distance = Math.min(tx, ty) + head.r * 2.6;
 
-    layers?.setSpeed(SPEED.depart);
     trail?.setRush(0);
 
-    // Arranca suave y acelera fuerte: se va disparado.
-    await animate(430, (u) => {
-        const e = u * u * u;
-        lift.value = {
-            x: ux * distance * e,
-            y: uy * distance * e,
-            scale: 1 + 0.14 * e,
-        };
+    // Como en la referencia: toma impulso (retrocede y se encoge apenas),
+    // y se dispara acelerando hacia la cámara y fuera del recuadro.
+    const windup = 0.26;
+    let fired = false;
+    await animate(540, (u) => {
+        let p: number;
+        let scale: number;
+
+        if (u < windup) {
+            const v = Math.sin(((u / windup) * Math.PI) / 2);
+            p = -0.04 * v;
+            scale = 1 - 0.04 * v;
+        } else {
+            if (!fired) {
+                fired = true;
+                layers?.setSpeed(SPEED.depart);
+                layers?.kick(5);
+            }
+
+            const e = Math.pow((u - windup) / (1 - windup), 2.4);
+            p = -0.04 + 1.04 * e;
+            scale = 0.96 + 0.28 * e;
+        }
+
+        lift.value = { x: ux * distance * p, y: uy * distance * p, scale };
     });
 
-    // La cola de la estela pasa rápido por el panel y queda la galaxia.
+    // La estela se queda un instante y su cola la recorre, acelerando,
+    // hasta salir tras él; queda la galaxia.
     hidden.value = true;
-    trail?.setAmount(0, 5.5);
-    await sleep(520);
+    trail?.release(0.12, 0.34);
+    await sleep(500);
 }
 
 function onEmergeEnd() {
@@ -545,16 +621,18 @@ onBeforeUnmount(() => {
                     transform: `translate(-50%, -${(80 / 144) * 100}%) translate(${lift.x}px, ${lift.y}px) scale(${lift.scale})`,
                 }"
             >
-                <KaiCharacter
-                    ref="kai"
-                    :size="size"
-                    :surface="galaxy ? 'dark' : 'light'"
-                    @emerge-phase="emit('phase', $event.phase)"
-                    @emerge-end="
-                        emit('phase', null);
-                        onEmergeEnd();
-                    "
-                />
+                <div ref="driftEl" class="kls-drift">
+                    <KaiCharacter
+                        ref="kai"
+                        :size="size"
+                        :surface="galaxy ? 'dark' : 'light'"
+                        @emerge-phase="emit('phase', $event.phase)"
+                        @emerge-end="
+                            emit('phase', null);
+                            onEmergeEnd();
+                        "
+                    />
+                </div>
             </div>
         </div>
     </div>
@@ -665,6 +743,10 @@ onBeforeUnmount(() => {
 .kls.is-galaxy .kls-kai {
     top: 52%;
     left: 57%;
+}
+
+.kls-drift {
+    will-change: transform;
 }
 
 .kls-kai.is-hidden {

@@ -1,8 +1,9 @@
 # NavBar Intra · Kiub
 
-Nueva barra de navegación de la intranet (`resources/js/components/AppHeader.vue`).
-Conserva los colores, secciones y botones de la barra actual y añade los efectos
-y el movimiento de la referencia en video.
+Nueva barra de navegación de la intranet (`resources/js/components/AppHeader.vue`),
+versión 2 («NavBar v2 · Escritorio»): logo «Kiub», secciones Inicio, Servicios
+KH, HR.Space, Kaizen University, Comunicaciones (Noticias y Calendario) y
+Koupons; búsqueda, menú «Herramientas», campana y tarjeta de usuario.
 
 ## Qué incluye
 
@@ -10,14 +11,22 @@ y el movimiento de la referencia en video.
   rebote al salir; se mantiene expandida mientras hay un menú o la búsqueda abierta.
 - **Brillo que sigue al cursor** en el borde y la superficie de la barra.
 - **Enlaces**: el texto sube y crece levemente, un subrayado crece desde la izquierda
-  (y se retrae hacia la izquierda), y el chevron de «Módulos» gira.
+  (y se retrae hacia la izquierda), y el chevron de «Comunicaciones» gira.
+- **Herramientas** (llave inglesa): menú de administración en dos columnas con
+  entrada escalonada; la llave gira al abrirlo.
 - **Píldora activa deslizante** con punto pulsante; se mueve al instante al hacer clic,
   incluso entre visitas de Inertia.
 - **Búsqueda que se transforma**: el botón circular se estira hasta un campo con `ESC`
   y botón de cierre; al cerrarse se encoge con un pequeño rebote.
 - **Campana** que se balancea al pasar el cursor y contador opcional.
-- **Tarjeta de usuario** con ola de letras en el nombre, avatar que gira y menú.
-- **Móvil**: panel lateral con entrada escalonada y submenú de módulos plegable.
+- **Tarjeta de usuario** con ola de letras en el nombre, avatar que gira y menú
+  (Configuración y Cerrar sesión). Al buscar se recoge al avatar.
+- **Responsivo**: ≤ 1430 px la búsqueda se abre sobre las secciones, que se
+  desvanecen; ≤ 1380 px la tarjeta queda en el avatar; ≤ 1180 px las secciones
+  pasan al menú lateral; ≤ 720 px barra compacta y sin el botón Herramientas
+  (sigue en el menú lateral).
+- **Móvil**: panel lateral flotante con entrada escalonada, Comunicaciones
+  plegable y, bajo «Administración», Herramientas plegable.
 - Respeta `prefers-reduced-motion` y el modo oscuro (`.dark` en `<html>`).
 
 ## Uso
@@ -25,8 +34,8 @@ y el movimiento de la referencia en video.
 ```vue
 <AppHeader
     :breadcrumbs="breadcrumbs"
-    :modules="[
-        { title: 'Recursos Humanos', href: '/rrhh', description: 'Vacaciones y nómina' },
+    :tools="[
+        { title: 'Vacaciones', href: '/herramientas/vacaciones', icon: Plane },
     ]"
     user-subtitle="Kaizen Holdings · IT Tecnología"
     :notification-count="3"
@@ -38,15 +47,17 @@ y el movimiento de la referencia en video.
 | Prop | Tipo | Por defecto | Descripción |
 | --- | --- | --- | --- |
 | `breadcrumbs` | `BreadcrumbItem[]` | `[]` | Igual que antes. |
-| `modules` | `(NavItem & { description?: string })[]` | `[]` | Elementos del desplegable «Módulos». |
+| `tools` | `{ title, href, icon }[]` | las 13 del diseño | Accesos del menú «Herramientas». Vacío oculta el menú. |
 | `userSubtitle` | `string` | email del usuario | Segunda línea de la tarjeta de usuario. |
 | `notificationCount` | `number` | `0` | Muestra el contador sobre la campana si es mayor que 0. |
 | `animatedMark` | `boolean` | `true` | Barras animadas junto al logo. |
 
 Eventos: `search` (texto buscado al pulsar Enter) y `notifications` (clic en la campana).
 
-Las rutas de **Comunicaciones** y **Calendario** están como `/comunicaciones` y
-`/calendario` en `navEntries`; cámbialas por tus rutas de Wayfinder.
+Las rutas de las secciones (`navEntries`) y de las herramientas
+(`DEFAULT_TOOLS`) son provisionales (`/servicios-kh`, `/noticias`,
+`/herramientas/vacaciones`…); cámbialas por tus rutas de Wayfinder.
+«Configuración» lleva al perfil y «Cerrar sesión» usa `logout()`.
 
 ## KAI · compañero digital (laboratorio)
 

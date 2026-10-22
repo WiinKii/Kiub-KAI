@@ -58,6 +58,10 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
     let time = 0;
     let spawn = 0;
     let drawn = false;
+    /** Barrido final: la cola recorre la cinta y sale tras KAI. */
+    let sweep = -1;
+    let sweepHold = 0;
+    let sweepTime = 0.36;
     const droplets: Droplet[] = [];
 
     function resize() {
@@ -79,6 +83,22 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
         }
 
         time += dt;
+
+        // Barrido: tras una breve pausa, la cola acelera hasta salir.
+        let cut = 0;
+
+        if (sweep >= 0) {
+            sweep += dt;
+            const u = Math.max(0, sweep - sweepHold) / sweepTime;
+            cut = Math.min(1, u * u);
+
+            if (u >= 1) {
+                sweep = -1;
+                target = 0;
+                amount = 0;
+            }
+        }
+
         // Crece rápido y se recoge un poco más despacio.
         const rate = target > amount ? 6.5 : retract;
         amount += (target - amount) * Math.min(1, dt * rate);
@@ -121,7 +141,7 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
             // Junto a KAI, tan ancha como su borde blanco: se unen sin escalón.
             const w = head.r * (OUTLINE + 0.05 * rush);
             const edge = clip ? toEdge(clip.rect, head.x, head.y, ux, uy) : len;
-            const points = [0, 1].map((k) => ({
+            const points = [0, 1 - cut].map((k) => ({
                 x: head.x + ux * len * k,
                 y: head.y + uy * len * k,
                 w: widthAt(w, len * k, edge),
@@ -166,7 +186,7 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
             // Gotitas que se desprenden junto a la espalda de KAI.
             spawn -= dt;
 
-            if (spawn <= 0 && amount > 0.5) {
+            if (spawn <= 0 && amount > 0.5 && sweep < 0) {
                 spawn = 0.09 + Math.random() * 0.08;
                 const inside = Math.random() < 0.6;
                 const side = (Math.random() - 0.5) * 2;
@@ -229,6 +249,15 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
             target = value;
             retract = rate;
         },
+        /**
+         * Salida: la cinta se queda un instante (`hold`, s) y su cola la
+         * recorre acelerando (`duration`, s) hasta salir tras KAI.
+         */
+        release(hold = 0.12, duration = 0.36) {
+            sweep = 0;
+            sweepHold = hold;
+            sweepTime = duration;
+        },
         /** 0-1: pulso de luz y algo más de anchura mientras se valida. */
         setRush(value: number) {
             rush = value;
@@ -236,6 +265,7 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
         clear() {
             target = 0;
             amount = 0;
+            sweep = -1;
             droplets.length = 0;
         },
     };

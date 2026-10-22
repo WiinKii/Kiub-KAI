@@ -14,6 +14,8 @@
 export type TravelLayers = {
     /** Velocidad objetivo: ~0 reposo, 1 viaje, 2+ impulso. */
     setSpeed: (value: number) => void;
+    /** Empujón instantáneo (velocidad/s): el arranque sobrepasa un poco. */
+    kick: (value: number) => void;
     /** Dirección del viaje (radianes; el entorno va al revés). */
     setHeading: (angle: number) => void;
     resize: (width: number, height: number) => void;
@@ -56,6 +58,8 @@ export function createTravelLayers(
     let dpr = 1;
     let speed = 0.04;
     let target = 0.04;
+    /** Ritmo de cambio de la velocidad (muelle, sin tirones). */
+    let accel = 0;
     let heading = 0.55;
     let time = 0;
     let travel = 0;
@@ -197,6 +201,9 @@ export function createTravelLayers(
         setSpeed(value) {
             target = value;
         },
+        kick(value) {
+            accel += value;
+        },
         setHeading(angle) {
             heading = angle;
         },
@@ -211,9 +218,12 @@ export function createTravelLayers(
         frame(dt) {
             const step = Math.min(dt, 0.05);
             time += step;
-            // Acelera con algo de inercia y frena más despacio.
-            const rate = target > speed ? 2.8 : 1.8;
-            speed += (target - speed) * Math.min(1, step * rate);
+            // Un muelle amortiguado: arranca con suavidad, acelera y llega
+            // sin tirones; frena más despacio de lo que acelera.
+            const omega = target > speed ? 4.6 : 3;
+            accel +=
+                (omega * omega * (target - speed) - 2 * omega * accel) * step;
+            speed = Math.max(0, speed + accel * step);
             travel = Math.min(1, Math.max(0, (speed - 0.1) / 0.6));
             offset.glow += DEPTH.glow * speed * step;
             offset.sparkle += DEPTH.sparkle * (0.15 + speed) * step;

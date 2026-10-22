@@ -10,14 +10,34 @@ const lastPill = { x: 0, w: 0, ready: false };
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
 import {
+    ArrowRightLeft,
     Bell,
+    Briefcase,
     Calendar,
+    CalendarCheck,
     ChevronDown,
+    ClipboardList,
+    Database,
+    FileText,
+    Gift,
+    GraduationCap,
     House,
-    LayoutGrid,
+    KeyRound,
+    Laptop,
+    LogOut,
     Menu,
     MessageSquare,
+    Newspaper,
+    Plane,
     Search,
+    Settings,
+    Ticket,
+    TicketPercent,
+    UserMinus,
+    UserPlus,
+    Users,
+    Wallet,
+    Wrench,
     X,
 } from '@lucide/vue';
 import type { Component } from 'vue';
@@ -29,7 +49,6 @@ import {
     ref,
     watch,
 } from 'vue';
-import AppLogo from '@/components/AppLogo.vue';
 import { pageDocks } from '@/components/kai/dockOwners';
 import KaiDock from '@/components/kai/KaiDock.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
@@ -38,36 +57,37 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
     Sheet,
+    SheetClose,
     SheetContent,
-    SheetHeader,
     SheetTitle,
     SheetTrigger,
 } from '@/components/ui/sheet';
-import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';
 import { arrivalPending, onNavbarReady } from '@/lib/kai/arrival';
-import { dashboard } from '@/routes';
+import { dashboard, logout } from '@/routes';
+import { edit } from '@/routes/profile';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
-type ModuleItem = NavItem & { description?: string };
+type MenuItem = { title: string; href: NavItem['href']; icon: Component };
 
 type NavEntry = {
     key: string;
     title: string;
     icon: Component;
     href?: NavItem['href'];
-    children?: ModuleItem[];
+    children?: MenuItem[];
 };
 
 type Props = {
     breadcrumbs?: BreadcrumbItem[];
-    /** Elementos del desplegable «Módulos». */
-    modules?: ModuleItem[];
+    /** Accesos del menú «Herramientas» (administración). */
+    tools?: MenuItem[];
     /** Segunda línea de la tarjeta de usuario, p. ej. «Kaizen Holdings · IT Tecnología». */
     userSubtitle?: string;
     notificationCount?: number;
@@ -79,7 +99,6 @@ type Props = {
 
 const props = withDefaults(defineProps<Props>(), {
     breadcrumbs: () => [],
-    modules: () => [],
     userSubtitle: '',
     notificationCount: 0,
     animatedMark: true,
@@ -99,24 +118,85 @@ const { isCurrentUrl } = useCurrentUrl();
 const navEntries = computed<NavEntry[]>(() => [
     { key: 'inicio', title: 'Inicio', icon: House, href: dashboard() },
     {
-        key: 'modulos',
-        title: 'Módulos',
-        icon: LayoutGrid,
-        children: props.modules,
+        key: 'servicios',
+        title: 'Servicios KH',
+        icon: Briefcase,
+        href: '/servicios-kh',
+    },
+    { key: 'hrspace', title: 'HR.Space', icon: Users, href: '/hr-space' },
+    {
+        key: 'university',
+        title: 'Kaizen University',
+        icon: GraduationCap,
+        href: '/kaizen-university',
     },
     {
         key: 'comunicaciones',
         title: 'Comunicaciones',
         icon: MessageSquare,
-        href: '/comunicaciones',
+        children: [
+            { title: 'Noticias', href: '/noticias', icon: Newspaper },
+            { title: 'Calendario', href: '/calendario', icon: Calendar },
+        ],
     },
     {
-        key: 'calendario',
-        title: 'Calendario',
-        icon: Calendar,
-        href: '/calendario',
+        key: 'koupons',
+        title: 'Koupons',
+        icon: TicketPercent,
+        href: '/koupons',
     },
 ]);
+
+// Herramientas de administración (en orden). También cambia estos href.
+const DEFAULT_TOOLS: MenuItem[] = [
+    {
+        title: 'Gestión de Servicios',
+        href: '/herramientas/gestion-servicios',
+        icon: ClipboardList,
+    },
+    { title: 'Data Máster', href: '/herramientas/data-master', icon: Database },
+    {
+        title: 'Nuevo Ingreso',
+        href: '/herramientas/nuevo-ingreso',
+        icon: UserPlus,
+    },
+    {
+        title: 'Movimiento de Personal',
+        href: '/herramientas/movimiento-personal',
+        icon: ArrowRightLeft,
+    },
+    {
+        title: 'Egreso de Personal',
+        href: '/herramientas/egreso-personal',
+        icon: UserMinus,
+    },
+    { title: 'Prestaciones', href: '/herramientas/prestaciones', icon: Wallet },
+    { title: 'Vacaciones', href: '/herramientas/vacaciones', icon: Plane },
+    { title: 'Permisos', href: '/herramientas/permisos', icon: CalendarCheck },
+    { title: 'Beneficios', href: '/herramientas/beneficios', icon: Gift },
+    {
+        title: 'Admin Koupons',
+        href: '/herramientas/admin-koupons',
+        icon: Ticket,
+    },
+    {
+        title: 'Contratos Laborales',
+        href: '/herramientas/contratos',
+        icon: FileText,
+    },
+    {
+        title: 'Asignación de equipos',
+        href: '/herramientas/equipos',
+        icon: Laptop,
+    },
+    {
+        title: 'Asignación de licencias',
+        href: '/herramientas/licencias',
+        icon: KeyRound,
+    },
+];
+
+const tools = computed(() => props.tools ?? DEFAULT_TOOLS);
 
 const activeKey = computed(() => {
     const match = navEntries.value.find((entry) =>
@@ -132,10 +212,21 @@ const activeKey = computed(() => {
 const pendingKey = ref<string | null>(null);
 const shownKey = computed(() => pendingKey.value ?? activeKey.value);
 
-const modulesOpen = ref(false);
+/** Desplegables (uno a la vez) y acordeones del menú móvil. */
+const comOpen = ref(false);
+const toolsOpen = ref(false);
 const userOpen = ref(false);
 const sheetOpen = ref(false);
-const mobileModulesOpen = ref(false);
+const mobileOpen = ref<Record<string, boolean>>({});
+
+function toggleMobile(key: string) {
+    mobileOpen.value = { ...mobileOpen.value, [key]: !mobileOpen.value[key] };
+}
+
+// Cerrar sesión: limpia la caché de Inertia antes de salir.
+function onLogout() {
+    router.flushAll();
+}
 
 const searchOpen = ref(false);
 const searchTouched = ref(false);
@@ -143,7 +234,8 @@ const query = ref('');
 const searchInput = ref<HTMLInputElement | null>(null);
 
 const engaged = computed(
-    () => searchOpen.value || userOpen.value || modulesOpen.value,
+    () =>
+        searchOpen.value || userOpen.value || comOpen.value || toolsOpen.value,
 );
 
 const userSubtitle = computed(
@@ -168,9 +260,20 @@ function onNavClick(event: MouseEvent, key: string) {
     }
 
     pendingKey.value = key;
-    sheetOpen.value = false;
-    modulesOpen.value = false;
+    closeMenus();
 }
+
+function closeMenus() {
+    sheetOpen.value = false;
+    comOpen.value = false;
+    toolsOpen.value = false;
+    userOpen.value = false;
+}
+
+// Superficie común de los desplegables (se renderizan en un portal).
+const menuClass =
+    'kn-pop rounded-[22px] border-white/90 bg-[#f6f8fb]/97 p-2.5 shadow-[0_2px_8px_rgba(5,25,36,0.06),0_28px_56px_-22px_rgba(5,25,36,0.38)] backdrop-blur-xl duration-300 dark:border-white/10 dark:bg-[#111d25]/95';
+const sepClass = 'mx-1.5 my-1.5 bg-[rgba(5,25,36,0.08)] dark:bg-white/10';
 
 /* ── Brillo del borde que sigue al cursor ───────────────────────────── */
 const navEl = ref<HTMLElement | null>(null);
@@ -273,7 +376,8 @@ function openSearch() {
     if (!searchOpen.value) {
         searchOpen.value = true;
         searchTouched.value = true;
-        modulesOpen.value = false;
+        comOpen.value = false;
+        toolsOpen.value = false;
         userOpen.value = false;
     }
 
@@ -398,15 +502,16 @@ onBeforeUnmount(() => {
                         </SheetTrigger>
                         <SheetContent
                             side="left"
-                            class="w-[300px] gap-0 border-white/80 bg-[#f1f4f8]/95 p-4 backdrop-blur-xl data-[state=open]:duration-500 data-[state=open]:ease-[cubic-bezier(.22,1,.36,1)] dark:border-white/10 dark:bg-[#0f1a22]/95"
+                            class="kn-pop inset-y-[10px] left-[10px] h-auto w-[min(310px,calc(100%-50px))] gap-3.5 rounded-[26px] border border-white/85 bg-[#f1f4f8]/97 p-4 shadow-[0_30px_60px_-20px_rgba(5,25,36,0.45)] backdrop-blur-xl data-[state=open]:duration-700 data-[state=open]:ease-[cubic-bezier(.34,1.56,.64,1)] dark:border-white/10 dark:bg-[#0f1a22]/95 [&>button:last-child]:hidden"
                         >
                             <SheetTitle class="sr-only">
                                 Menú de navegación
                             </SheetTitle>
-                            <SheetHeader class="p-0 pb-5 text-left">
+                            <div class="kn-sheet-head">
                                 <Link
                                     :href="dashboard()"
                                     class="kn-logo"
+                                    aria-label="Kiub, ir a Inicio"
                                     @click="onNavClick($event, 'inicio')"
                                 >
                                     <span
@@ -416,104 +521,38 @@ onBeforeUnmount(() => {
                                     >
                                         <i /><i /><i />
                                     </span>
-                                    <span class="kn-word"><AppLogo /></span>
+                                    <span class="kn-word">Kiub</span>
                                 </Link>
-                            </SheetHeader>
-
-                            <div class="kn-sheet-body">
-                                <nav
-                                    class="kn-sheet-nav"
-                                    aria-label="Secciones"
-                                >
-                                    <template
-                                        v-for="entry in navEntries"
-                                        :key="entry.key"
+                                <SheetClose as-child>
+                                    <button
+                                        type="button"
+                                        class="kn-icon kn-sheet-x"
+                                        aria-label="Cerrar menú"
                                     >
-                                        <template v-if="entry.children">
-                                            <button
-                                                type="button"
-                                                class="kn-sheet-link"
-                                                :class="{
-                                                    'is-active':
-                                                        shownKey === entry.key,
-                                                }"
-                                                :aria-expanded="
-                                                    mobileModulesOpen
-                                                        ? 'true'
-                                                        : 'false'
-                                                "
-                                                @click="
-                                                    mobileModulesOpen =
-                                                        !mobileModulesOpen
-                                                "
-                                            >
-                                                <component
-                                                    :is="entry.icon"
-                                                    class="kn-ic"
-                                                    aria-hidden="true"
-                                                />
-                                                {{ entry.title }}
-                                                <ChevronDown
-                                                    class="kn-ic kn-chevron kn-push"
-                                                    aria-hidden="true"
-                                                />
-                                            </button>
-                                            <div
-                                                class="kn-sub"
-                                                :class="{
-                                                    'is-open':
-                                                        mobileModulesOpen,
-                                                }"
-                                            >
-                                                <div class="kn-sub-inner">
-                                                    <Link
-                                                        v-for="item in entry.children"
-                                                        :key="item.title"
-                                                        :href="item.href"
-                                                        class="kn-sub-link"
-                                                        :tabindex="
-                                                            mobileModulesOpen
-                                                                ? 0
-                                                                : -1
-                                                        "
-                                                        @click="
-                                                            onNavClick(
-                                                                $event,
-                                                                entry.key,
-                                                            )
-                                                        "
-                                                    >
-                                                        {{ item.title }}
-                                                    </Link>
-                                                    <p
-                                                        v-if="
-                                                            !entry.children
-                                                                .length
-                                                        "
-                                                        class="kn-empty"
-                                                    >
-                                                        Aún no hay módulos
-                                                        configurados.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </template>
-                                        <Link
-                                            v-else-if="entry.href"
-                                            :href="entry.href"
+                                        <X class="kn-ic" aria-hidden="true" />
+                                    </button>
+                                </SheetClose>
+                            </div>
+
+                            <nav class="kn-sheet-nav" aria-label="Secciones">
+                                <template
+                                    v-for="entry in navEntries"
+                                    :key="entry.key"
+                                >
+                                    <template v-if="entry.children">
+                                        <button
+                                            type="button"
                                             class="kn-sheet-link"
                                             :class="{
                                                 'is-active':
                                                     shownKey === entry.key,
                                             }"
-                                            :aria-current="
-                                                activeKey === entry.key
-                                                    ? 'page'
-                                                    : undefined
+                                            :aria-expanded="
+                                                mobileOpen[entry.key]
+                                                    ? 'true'
+                                                    : 'false'
                                             "
-                                            @click="
-                                                onNavClick($event, entry.key)
-                                            "
+                                            @click="toggleMobile(entry.key)"
                                         >
                                             <component
                                                 :is="entry.icon"
@@ -521,39 +560,132 @@ onBeforeUnmount(() => {
                                                 aria-hidden="true"
                                             />
                                             {{ entry.title }}
-                                            <span
-                                                class="kn-dot kn-push"
+                                            <ChevronDown
+                                                class="kn-ic kn-chevron kn-push"
                                                 aria-hidden="true"
                                             />
-                                        </Link>
+                                        </button>
+                                        <div
+                                            class="kn-sub"
+                                            :class="{
+                                                'is-open':
+                                                    mobileOpen[entry.key],
+                                            }"
+                                        >
+                                            <div class="kn-sub-inner">
+                                                <Link
+                                                    v-for="item in entry.children"
+                                                    :key="item.title"
+                                                    :href="item.href"
+                                                    class="kn-sub-link"
+                                                    :tabindex="
+                                                        mobileOpen[entry.key]
+                                                            ? 0
+                                                            : -1
+                                                    "
+                                                    @click="
+                                                        onNavClick(
+                                                            $event,
+                                                            entry.key,
+                                                        )
+                                                    "
+                                                >
+                                                    {{ item.title }}
+                                                </Link>
+                                            </div>
+                                        </div>
                                     </template>
-                                </nav>
-
-                                <div class="kn-sheet-user">
-                                    <Avatar class="kn-avatar">
-                                        <AvatarImage
-                                            v-if="auth.user.avatar"
-                                            :src="auth.user.avatar"
-                                            :alt="auth.user.name"
+                                    <Link
+                                        v-else-if="entry.href"
+                                        :href="entry.href"
+                                        class="kn-sheet-link"
+                                        :class="{
+                                            'is-active': shownKey === entry.key,
+                                        }"
+                                        :aria-current="
+                                            activeKey === entry.key
+                                                ? 'page'
+                                                : undefined
+                                        "
+                                        @click="onNavClick($event, entry.key)"
+                                    >
+                                        <component
+                                            :is="entry.icon"
+                                            class="kn-ic"
+                                            aria-hidden="true"
                                         />
-                                        <AvatarFallback
-                                            class="kn-avatar-fallback"
-                                        >
-                                            {{ getInitials(auth.user?.name) }}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                    <span class="kn-user-text">
-                                        <span class="kn-user-name">
-                                            {{ auth.user.name }}
-                                        </span>
+                                        {{ entry.title }}
                                         <span
-                                            v-if="userSubtitle"
-                                            class="kn-user-sub"
-                                        >
-                                            {{ userSubtitle }}
-                                        </span>
+                                            class="kn-dot kn-push"
+                                            aria-hidden="true"
+                                        />
+                                    </Link>
+                                </template>
+
+                                <template v-if="tools.length">
+                                    <p class="kn-sheet-label">Administración</p>
+                                    <button
+                                        type="button"
+                                        class="kn-sheet-link"
+                                        :aria-expanded="
+                                            mobileOpen.tools ? 'true' : 'false'
+                                        "
+                                        @click="toggleMobile('tools')"
+                                    >
+                                        <Wrench
+                                            class="kn-ic"
+                                            aria-hidden="true"
+                                        />
+                                        Herramientas
+                                        <ChevronDown
+                                            class="kn-ic kn-chevron kn-push"
+                                            aria-hidden="true"
+                                        />
+                                    </button>
+                                    <div
+                                        class="kn-sub"
+                                        :class="{ 'is-open': mobileOpen.tools }"
+                                    >
+                                        <div class="kn-sub-inner">
+                                            <Link
+                                                v-for="item in tools"
+                                                :key="item.title"
+                                                :href="item.href"
+                                                class="kn-sub-link"
+                                                :tabindex="
+                                                    mobileOpen.tools ? 0 : -1
+                                                "
+                                                @click="closeMenus"
+                                            >
+                                                {{ item.title }}
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </template>
+                            </nav>
+
+                            <div class="kn-sheet-user">
+                                <Avatar class="kn-avatar">
+                                    <AvatarImage
+                                        v-if="auth.user.avatar"
+                                        :src="auth.user.avatar"
+                                        :alt="auth.user.name"
+                                    />
+                                    <AvatarFallback class="kn-avatar-fallback">
+                                        {{ getInitials(auth.user?.name) }}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <span class="kn-user-text">
+                                    <span class="kn-user-name">
+                                        {{ auth.user.name }}
                                     </span>
-                                </div>
+                                    <span
+                                        v-if="userSubtitle"
+                                        class="kn-user-sub"
+                                    >
+                                        {{ userSubtitle }}
+                                    </span>
+                                </span>
                             </div>
                         </SheetContent>
                     </Sheet>
@@ -561,6 +693,7 @@ onBeforeUnmount(() => {
                     <Link
                         :href="dashboard()"
                         class="kn-logo kn-enter"
+                        aria-label="Kiub, ir a Inicio"
                         @click="onNavClick($event, 'inicio')"
                     >
                         <span
@@ -570,7 +703,7 @@ onBeforeUnmount(() => {
                         >
                             <i /><i /><i />
                         </span>
-                        <span class="kn-word"><AppLogo /></span>
+                        <span class="kn-word">Kiub</span>
                     </Link>
 
                     <!-- Enlaces de escritorio -->
@@ -592,7 +725,7 @@ onBeforeUnmount(() => {
                         <template v-for="entry in navEntries" :key="entry.key">
                             <DropdownMenu
                                 v-if="entry.children"
-                                v-model:open="modulesOpen"
+                                v-model:open="comOpen"
                             >
                                 <DropdownMenuTrigger as-child>
                                     <button
@@ -622,66 +755,35 @@ onBeforeUnmount(() => {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent
                                     align="start"
+                                    :align-offset="-8"
                                     :side-offset="16"
-                                    class="min-w-[440px] rounded-[22px] border-white/90 bg-[#f6f8fb]/95 p-2.5 shadow-[0_2px_8px_rgba(5,25,36,0.06),0_28px_56px_-22px_rgba(5,25,36,0.38)] backdrop-blur-xl duration-300 dark:border-white/10 dark:bg-[#111d25]/95"
+                                    :class="[menuClass, 'min-w-[240px]']"
                                 >
-                                    <div class="kn-menu-body">
-                                        <p class="kn-menu-title">
-                                            {{ entry.title }}
-                                        </p>
-                                        <div
-                                            v-if="entry.children.length"
-                                            class="kn-menu-grid"
+                                    <p class="kn-menu-title">
+                                        {{ entry.title }}
+                                    </p>
+                                    <DropdownMenuItem
+                                        v-for="item in entry.children"
+                                        :key="item.title"
+                                        as-child
+                                    >
+                                        <Link
+                                            :href="item.href"
+                                            class="kn-menu-item"
+                                            @click="
+                                                onNavClick($event, entry.key)
+                                            "
                                         >
-                                            <DropdownMenuItem
-                                                v-for="item in entry.children"
-                                                :key="item.title"
-                                                as-child
-                                            >
-                                                <Link
-                                                    :href="item.href"
-                                                    class="kn-menu-item"
-                                                    @click="
-                                                        onNavClick(
-                                                            $event,
-                                                            entry.key,
-                                                        )
-                                                    "
-                                                >
-                                                    <span class="kn-menu-icon">
-                                                        <component
-                                                            :is="
-                                                                item.icon ??
-                                                                LayoutGrid
-                                                            "
-                                                            class="kn-ic"
-                                                            aria-hidden="true"
-                                                        />
-                                                    </span>
-                                                    <span class="kn-menu-text">
-                                                        <span
-                                                            class="kn-menu-name"
-                                                        >
-                                                            {{ item.title }}
-                                                        </span>
-                                                        <span
-                                                            v-if="
-                                                                item.description
-                                                            "
-                                                            class="kn-menu-desc"
-                                                        >
-                                                            {{
-                                                                item.description
-                                                            }}
-                                                        </span>
-                                                    </span>
-                                                </Link>
-                                            </DropdownMenuItem>
-                                        </div>
-                                        <p v-else class="kn-empty">
-                                            Aún no hay módulos configurados.
-                                        </p>
-                                    </div>
+                                            <span class="kn-menu-icon">
+                                                <component
+                                                    :is="item.icon"
+                                                    class="kn-ic"
+                                                    aria-hidden="true"
+                                                />
+                                            </span>
+                                            {{ item.title }}
+                                        </Link>
+                                    </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
 
@@ -710,51 +812,104 @@ onBeforeUnmount(() => {
 
                     <div class="kn-right kn-enter">
                         <!-- Búsqueda -->
-                        <div
-                            class="kn-search"
-                            :class="{
-                                'is-open': searchOpen,
-                                'is-closed': searchTouched && !searchOpen,
-                            }"
-                            role="search"
-                        >
-                            <button
-                                type="button"
-                                class="kn-search-btn"
-                                aria-label="Buscar"
-                                :aria-expanded="searchOpen ? 'true' : 'false'"
-                                @mousedown="
-                                    searchOpen && $event.preventDefault()
-                                "
-                                @click="openSearch"
+                        <div class="kn-search-slot">
+                            <div
+                                class="kn-search"
+                                :class="{
+                                    'is-open': searchOpen,
+                                    'is-closed': searchTouched && !searchOpen,
+                                }"
+                                role="search"
                             >
-                                <Search class="kn-ic" aria-hidden="true" />
-                            </button>
-                            <input
-                                ref="searchInput"
-                                v-model="query"
-                                type="text"
-                                class="kn-search-input"
-                                placeholder="Buscar en la intranet…"
-                                aria-label="Buscar en la intranet"
-                                autocomplete="off"
-                                enterkeyhint="search"
-                                :tabindex="searchOpen ? 0 : -1"
-                                @keydown.enter.prevent="submitSearch"
-                                @keydown.esc.prevent="closeSearch"
-                                @blur="onSearchBlur"
-                            />
-                            <kbd class="kn-kbd" aria-hidden="true">ESC</kbd>
-                            <button
-                                type="button"
-                                class="kn-search-close"
-                                aria-label="Cerrar búsqueda"
-                                :tabindex="searchOpen ? 0 : -1"
-                                @click="closeSearch"
-                            >
-                                <X class="kn-ic" aria-hidden="true" />
-                            </button>
+                                <button
+                                    type="button"
+                                    class="kn-search-btn"
+                                    aria-label="Buscar"
+                                    :aria-expanded="
+                                        searchOpen ? 'true' : 'false'
+                                    "
+                                    @mousedown="
+                                        searchOpen && $event.preventDefault()
+                                    "
+                                    @click="openSearch"
+                                >
+                                    <Search class="kn-ic" aria-hidden="true" />
+                                </button>
+                                <input
+                                    ref="searchInput"
+                                    v-model="query"
+                                    type="text"
+                                    class="kn-search-input"
+                                    placeholder="Buscar en la intranet…"
+                                    aria-label="Buscar en la intranet"
+                                    autocomplete="off"
+                                    enterkeyhint="search"
+                                    :tabindex="searchOpen ? 0 : -1"
+                                    @keydown.enter.prevent="submitSearch"
+                                    @keydown.esc.prevent="closeSearch"
+                                    @blur="onSearchBlur"
+                                />
+                                <kbd class="kn-kbd" aria-hidden="true">ESC</kbd>
+                                <button
+                                    type="button"
+                                    class="kn-search-close"
+                                    aria-label="Cerrar búsqueda"
+                                    :tabindex="searchOpen ? 0 : -1"
+                                    @click="closeSearch"
+                                >
+                                    <X class="kn-ic" aria-hidden="true" />
+                                </button>
+                            </div>
                         </div>
+
+                        <!-- Herramientas -->
+                        <DropdownMenu
+                            v-if="tools.length"
+                            v-model:open="toolsOpen"
+                        >
+                            <DropdownMenuTrigger as-child>
+                                <button
+                                    type="button"
+                                    class="kn-icon kn-tools"
+                                    aria-label="Herramientas"
+                                >
+                                    <Wrench class="kn-ic" aria-hidden="true" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                                align="end"
+                                :align-offset="-8"
+                                :side-offset="16"
+                                :class="[menuClass, 'w-[480px]']"
+                            >
+                                <p class="kn-menu-title">Herramientas</p>
+                                <div class="kn-tools-grid">
+                                    <DropdownMenuItem
+                                        v-for="(item, index) in tools"
+                                        :key="item.title"
+                                        as-child
+                                    >
+                                        <Link
+                                            :href="item.href"
+                                            class="kn-tool"
+                                            :style="{
+                                                animationDelay: `${index * 20}ms`,
+                                            }"
+                                            @click="closeMenus"
+                                        >
+                                            <span class="kn-tool-icon">
+                                                <component
+                                                    :is="item.icon"
+                                                    class="kn-ic"
+                                                    aria-hidden="true"
+                                                />
+                                            </span>
+                                            {{ item.title }}
+                                        </Link>
+                                    </DropdownMenuItem>
+                                </div>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
 
                         <!-- Notificaciones -->
                         <button
@@ -833,10 +988,65 @@ onBeforeUnmount(() => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                                 align="end"
-                                :side-offset="14"
-                                class="w-64 rounded-[20px] border-white/90 bg-[#f6f8fb]/95 p-1.5 shadow-[0_2px_8px_rgba(5,25,36,0.06),0_28px_56px_-22px_rgba(5,25,36,0.38)] backdrop-blur-xl duration-300 dark:border-white/10 dark:bg-[#111d25]/95"
+                                :side-offset="16"
+                                :class="[menuClass, 'min-w-[270px]']"
                             >
-                                <UserMenuContent :user="auth.user" />
+                                <div class="kn-umenu-head">
+                                    <Avatar class="kn-avatar">
+                                        <AvatarImage
+                                            v-if="auth.user.avatar"
+                                            :src="auth.user.avatar"
+                                            :alt="auth.user.name"
+                                        />
+                                        <AvatarFallback
+                                            class="kn-avatar-fallback"
+                                        >
+                                            {{ getInitials(auth.user?.name) }}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <span class="kn-user-text">
+                                        <span class="kn-user-name">
+                                            {{ auth.user.name }}
+                                        </span>
+                                        <span
+                                            v-if="userSubtitle"
+                                            class="kn-user-sub"
+                                        >
+                                            {{ userSubtitle }}
+                                        </span>
+                                    </span>
+                                </div>
+                                <DropdownMenuSeparator :class="sepClass" />
+                                <DropdownMenuItem as-child>
+                                    <Link
+                                        :href="edit()"
+                                        class="kn-umenu-item"
+                                        prefetch
+                                        @click="closeMenus"
+                                    >
+                                        <Settings
+                                            class="kn-ic"
+                                            aria-hidden="true"
+                                        />
+                                        Configuración
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator :class="sepClass" />
+                                <DropdownMenuItem as-child>
+                                    <Link
+                                        :href="logout()"
+                                        as="button"
+                                        class="kn-umenu-item"
+                                        data-test="logout-button"
+                                        @click="onLogout"
+                                    >
+                                        <LogOut
+                                            class="kn-ic"
+                                            aria-hidden="true"
+                                        />
+                                        Cerrar sesión
+                                    </Link>
+                                </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>
@@ -858,8 +1068,11 @@ onBeforeUnmount(() => {
     </div>
 </template>
 
-<style scoped>
-.kn-root {
+<style>
+/* Tokens del navbar. Sin «scoped»: los desplegables y el menú móvil se
+   renderizan en un portal, fuera de .kn-root, y también los usan. */
+.kn-root,
+.kn-pop {
     --kn-ink: #051924;
     --kn-ink-2: #43535b;
     --kn-ink-3: #68747c;
@@ -884,7 +1097,8 @@ onBeforeUnmount(() => {
     --kn-swift: cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-:root.dark .kn-root {
+:root.dark .kn-root,
+:root.dark .kn-pop {
     --kn-ink: #e8eef2;
     --kn-ink-2: #a9b6bf;
     --kn-ink-3: #8b98a1;
@@ -903,7 +1117,9 @@ onBeforeUnmount(() => {
     --kn-highlight: rgba(255, 255, 255, 0.08);
     --kn-shade: 0, 0, 0;
 }
+</style>
 
+<style scoped>
 .kn-ic {
     width: 18px;
     height: 18px;
@@ -1116,8 +1332,10 @@ onBeforeUnmount(() => {
 }
 
 .kn-word {
-    display: inline-flex;
-    align-items: center;
+    display: inline-block;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
     transition: transform 0.55s var(--kn-spring);
 }
 
@@ -1172,6 +1390,9 @@ onBeforeUnmount(() => {
     border-radius: 999px;
     background: var(--kn-group);
     box-shadow: inset 0 1px 2px rgba(var(--kn-shade), 0.05);
+    transition:
+        opacity 0.35s var(--kn-soft),
+        transform 0.45s var(--kn-soft);
 }
 
 :root.dark .kn-links {
@@ -1208,13 +1429,14 @@ onBeforeUnmount(() => {
     display: inline-flex;
     align-items: center;
     height: 40px;
-    padding: 0 16px;
+    padding: 0 15px;
     border: 0;
     border-radius: 999px;
     background: transparent;
     font: inherit;
     font-size: 15px;
     font-weight: 500;
+    white-space: nowrap;
     color: var(--kn-ink-2);
     cursor: pointer;
     transition: color 0.25s var(--kn-soft);
@@ -1311,18 +1533,14 @@ onBeforeUnmount(() => {
     color: var(--kn-ink-3);
 }
 
-.kn-menu-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 4px;
-}
-
 .kn-menu-item {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px;
+    padding: 8px 10px;
     border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
     color: var(--kn-ink);
     outline: none;
     animation: kn-drop 0.5s var(--kn-soft) backwards;
@@ -1332,31 +1550,26 @@ onBeforeUnmount(() => {
         box-shadow 0.3s;
 }
 
-.kn-menu-item:nth-child(2) {
-    animation-delay: 0.04s;
-}
-
-.kn-menu-item:nth-child(3) {
-    animation-delay: 0.08s;
-}
-
-.kn-menu-item:nth-child(n + 4) {
-    animation-delay: 0.12s;
+.kn-menu-item:nth-of-type(3) {
+    animation-delay: 0.05s;
 }
 
 .kn-menu-item:hover,
-.kn-menu-item[data-highlighted] {
+.kn-menu-item[data-highlighted],
+.kn-tool:hover,
+.kn-tool[data-highlighted] {
     background: var(--kn-active);
     box-shadow: 0 6px 14px -10px rgba(var(--kn-shade), 0.35);
     transform: translateX(3px);
 }
 
-.kn-menu-icon {
+.kn-menu-icon,
+.kn-tool-icon {
     display: grid;
     flex-shrink: 0;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
     border-radius: 12px;
     background: var(--kn-chip);
     color: var(--kn-ink);
@@ -1371,28 +1584,96 @@ onBeforeUnmount(() => {
     transform: rotate(-6deg) scale(1.06);
 }
 
-.kn-menu-text {
+/* Herramientas: rejilla de dos columnas. */
+.kn-tools-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 4px;
+}
+
+.kn-tool {
     display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 6px 10px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--kn-ink);
+    outline: none;
+    animation: kn-drop 0.45s var(--kn-soft) backwards;
+    transition:
+        background 0.25s,
+        transform 0.45s var(--kn-spring),
+        box-shadow 0.3s;
 }
 
-.kn-menu-name {
+.kn-tool-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+}
+
+.kn-tool-icon .kn-ic {
+    width: 16px;
+    height: 16px;
+}
+
+.kn-tool:hover .kn-tool-icon,
+.kn-tool[data-highlighted] .kn-tool-icon {
+    background: var(--kn-group);
+    transform: rotate(-8deg) scale(1.08);
+}
+
+/* Menú de usuario */
+.kn-umenu-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px 10px;
+}
+
+.kn-umenu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    height: 42px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    font: inherit;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
+    color: var(--kn-ink);
+    text-align: left;
+    cursor: pointer;
+    outline: none;
+    animation: kn-drop 0.5s var(--kn-soft) 0.06s backwards;
+    transition:
+        background 0.25s,
+        transform 0.45s var(--kn-spring);
 }
 
-.kn-menu-desc {
-    font-size: 12px;
-    color: var(--kn-ink-3);
+.kn-umenu-item:hover,
+.kn-umenu-item[data-highlighted] {
+    background: var(--kn-active);
+    transform: translateX(3px);
 }
 
-.kn-empty {
-    margin: 0;
-    padding: 6px 10px 10px;
-    font-size: 13px;
-    color: var(--kn-ink-3);
+.kn-umenu-item .kn-ic {
+    width: 17px;
+    height: 17px;
+    color: var(--kn-ink-2);
+    transition: transform 0.5s var(--kn-spring);
+}
+
+.kn-umenu-item:hover .kn-ic,
+.kn-umenu-item[data-highlighted] .kn-ic {
+    transform: rotate(-12deg);
 }
 
 /* ── Lado derecho ───────────────────────────────────────────────────── */
@@ -1460,6 +1741,25 @@ onBeforeUnmount(() => {
     animation: kn-ring 0.9s var(--kn-soft);
 }
 
+.kn-tools .kn-ic {
+    transition: transform 0.6s var(--kn-spring);
+}
+
+.kn-tools:hover .kn-ic {
+    animation: kn-twist 0.8s var(--kn-soft);
+}
+
+.kn-tools[data-state='open'] {
+    background: var(--kn-active);
+    box-shadow:
+        0 0 0 4px rgba(93, 128, 147, 0.14),
+        0 10px 20px -12px rgba(var(--kn-shade), 0.4);
+}
+
+.kn-tools[data-state='open'] .kn-ic {
+    transform: rotate(-45deg);
+}
+
 .kn-badge {
     position: absolute;
     top: 6px;
@@ -1480,6 +1780,13 @@ onBeforeUnmount(() => {
 }
 
 /* Búsqueda: el botón circular se transforma en un campo. */
+.kn-search-slot {
+    position: relative;
+    display: flex;
+    flex-shrink: 0;
+    height: 48px;
+}
+
 .kn-search {
     position: relative;
     width: 48px;
@@ -1692,7 +1999,9 @@ onBeforeUnmount(() => {
     transition:
         transform 0.5s var(--kn-spring),
         box-shadow 0.35s var(--kn-soft),
-        background 0.25s;
+        background 0.25s,
+        gap 0.5s var(--kn-soft),
+        padding 0.5s var(--kn-soft);
 }
 
 .kn-user:hover,
@@ -1748,9 +2057,29 @@ onBeforeUnmount(() => {
     line-height: 1.25;
 }
 
+.kn-user .kn-user-text {
+    max-width: 230px;
+    overflow: hidden;
+    transition:
+        max-width 0.6s var(--kn-soft),
+        opacity 0.35s var(--kn-soft);
+}
+
+/* Al buscar, la tarjeta se recoge al avatar para dar sitio al campo. */
+.kn-bar.is-searching .kn-user .kn-user-text {
+    max-width: 0;
+    opacity: 0;
+}
+
+.kn-bar.is-searching .kn-user {
+    gap: 4px;
+    padding-right: 10px;
+}
+
 .kn-user-name {
     font-size: 14px;
     font-weight: 600;
+    white-space: nowrap;
     color: var(--kn-ink);
 }
 
@@ -1786,42 +2115,85 @@ onBeforeUnmount(() => {
 }
 
 /* ── Menú lateral (móvil) ───────────────────────────────────────────── */
-.kn-sheet-body {
+.kn-sheet-head {
     display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 18px;
-    min-height: 0;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 2px 2px 8px;
+}
+
+.kn-sheet-x {
+    width: 42px;
+    height: 42px;
+}
+
+.kn-sheet-x .kn-ic {
+    transition: transform 0.5s var(--kn-spring);
+}
+
+.kn-sheet-x:hover .kn-ic {
+    transform: rotate(90deg);
 }
 
 .kn-sheet-nav {
     display: flex;
+    flex: 1;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
+    min-height: 0;
+    margin: 0 -6px;
+    padding: 0 6px 6px;
+    overflow-y: auto;
 }
 
 .kn-sheet-nav > * {
+    flex-shrink: 0;
     animation: kn-slide 0.6s var(--kn-soft) backwards;
 }
 
 .kn-sheet-nav > :nth-child(1) {
-    animation-delay: 0.1s;
+    animation-delay: 0.08s;
 }
 
 .kn-sheet-nav > :nth-child(2) {
-    animation-delay: 0.15s;
+    animation-delay: 0.12s;
 }
 
 .kn-sheet-nav > :nth-child(3) {
-    animation-delay: 0.2s;
+    animation-delay: 0.16s;
 }
 
 .kn-sheet-nav > :nth-child(4) {
-    animation-delay: 0.25s;
+    animation-delay: 0.2s;
 }
 
 .kn-sheet-nav > :nth-child(5) {
-    animation-delay: 0.3s;
+    animation-delay: 0.24s;
+}
+
+.kn-sheet-nav > :nth-child(6) {
+    animation-delay: 0.28s;
+}
+
+.kn-sheet-nav > :nth-child(7) {
+    animation-delay: 0.32s;
+}
+
+.kn-sheet-nav > :nth-child(8) {
+    animation-delay: 0.36s;
+}
+
+.kn-sheet-nav > :nth-child(n + 9) {
+    animation-delay: 0.4s;
+}
+
+.kn-sheet-label {
+    margin: 10px 14px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--kn-ink-3);
 }
 
 .kn-sheet-link {
@@ -1829,7 +2201,7 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 12px;
     width: 100%;
-    height: 48px;
+    min-height: 46px;
     padding: 0 14px;
     border: 0;
     border-radius: 16px;
@@ -1898,9 +2270,10 @@ onBeforeUnmount(() => {
 
 .kn-sub-link {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
-    height: 40px;
-    padding: 0 14px;
+    min-height: 40px;
+    padding: 4px 14px;
     border-left: 1px solid rgba(var(--kn-shade), 0.1);
     border-radius: 0 12px 12px 0;
     font-size: 14px;
@@ -1922,7 +2295,7 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-top: auto;
+    flex-shrink: 0;
     padding: 10px;
     border: 1px solid rgba(255, 255, 255, 0.9);
     border-radius: 20px;
@@ -1942,7 +2315,40 @@ onBeforeUnmount(() => {
 }
 
 /* ── Responsivo ─────────────────────────────────────────────────────── */
-@media (max-width: 1023.98px) {
+@media (max-width: 1430px) {
+    /* Sin espacio para empujar: la búsqueda se abre sobre los módulos,
+       que se desvanecen. */
+    .kn-search-slot {
+        width: 48px;
+    }
+
+    .kn-search {
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 2;
+    }
+
+    .kn-bar.is-searching .kn-links {
+        opacity: 0;
+        transform: translateY(-3px);
+        pointer-events: none;
+    }
+}
+
+@media (max-width: 1380px) {
+    .kn-bar .kn-user .kn-user-text {
+        max-width: 0;
+        opacity: 0;
+    }
+
+    .kn-bar .kn-user {
+        gap: 4px;
+        padding-right: 10px;
+    }
+}
+
+@media (max-width: 1180px) {
     .kn-links {
         display: none;
     }
@@ -1957,7 +2363,7 @@ onBeforeUnmount(() => {
     }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
     .kn-header {
         padding: 10px 6px 0;
     }
@@ -1970,10 +2376,19 @@ onBeforeUnmount(() => {
         border-radius: 20px;
     }
 
+    .kn-word {
+        font-size: 20px;
+    }
+
     .kn-icon,
-    .kn-search {
+    .kn-search,
+    .kn-search-slot {
         width: 44px;
         height: 44px;
+    }
+
+    .kn-tools {
+        display: none;
     }
 
     .kn-search-btn,
@@ -1999,10 +2414,6 @@ onBeforeUnmount(() => {
         padding: 0 10px 0 2px;
     }
 
-    .kn-user .kn-user-text {
-        display: none;
-    }
-
     .kn-bar.is-searching .kn-logo,
     .kn-bar.is-searching .kn-burger,
     .kn-bar.is-searching .kn-bell {
@@ -2020,8 +2431,10 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
     .kn-root *,
-    .kn-sheet-body *,
-    .kn-menu-body * {
+    .kn-sheet-nav *,
+    .kn-menu-item,
+    .kn-tool,
+    .kn-umenu-item {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
@@ -2136,6 +2549,28 @@ onBeforeUnmount(() => {
 
     75% {
         rotate: 2deg;
+    }
+
+    100% {
+        rotate: 0deg;
+    }
+}
+
+@keyframes kn-twist {
+    0% {
+        rotate: 0deg;
+    }
+
+    30% {
+        rotate: -28deg;
+    }
+
+    60% {
+        rotate: 12deg;
+    }
+
+    80% {
+        rotate: -4deg;
     }
 
     100% {
