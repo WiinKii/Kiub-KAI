@@ -22,7 +22,9 @@ export type KaiState =
     | 'music'
     | 'sleeping'
     | 'shy'
-    | 'notice';
+    | 'notice'
+    | 'travel'
+    | 'rush';
 
 export type KaiReaction =
     | 'welcome'
@@ -66,15 +68,25 @@ export type KaiTrackOptions = {
 };
 
 /**
- * Fases de la aparición «Convergencia». `gentle` es la variante de
- * movimiento reducido (aparece y abre los ojos, sin trayectorias).
+ * Coreografías de aparición: «Convergencia» (gotas que se funden),
+ * «Corriente» (un cuerpo de agua que entra, se pliega y despierta) y
+ * «División» (KAI se reparte en cuatro gotas de color y desaparece).
+ */
+export type KaiEmergeKind = 'converge' | 'stream' | 'split';
+
+/**
+ * Fases de las apariciones. `gentle` es la variante de movimiento reducido
+ * (aparece y abre los ojos, sin trayectorias).
  */
 export type KaiEmergePhase =
     | 'pulse'
     | 'attraction'
     | 'fusion'
+    | 'current'
+    | 'fold'
     | 'awakening'
     | 'recognition'
+    | 'split'
     | 'gentle';
 
 export type KaiEmergeResult = {
@@ -86,7 +98,7 @@ export type KaiEngineEvents = {
     stateChange: { from: KaiState; to: KaiState };
     reactionStart: { name: KaiReaction };
     reactionEnd: KaiReactionResult;
-    emergeStart: { reduced: boolean };
+    emergeStart: { reduced: boolean; kind: KaiEmergeKind };
     emergePhase: { phase: KaiEmergePhase };
     emergeEnd: KaiEmergeResult;
 };
@@ -109,12 +121,14 @@ export type KaiController = {
     /** Señala con una manita hacia una dirección (pantalla); `null` la recoge. */
     point: (dir: KaiGaze | null) => void;
     /**
-     * Aparición «Convergencia»: KAI se forma con gotas que se funden y
-     * despierta. Llamarla de nuevo reinicia; se resuelve al terminar o al
-     * cancelarse. Las peticiones de estado y gesto durante la aparición se
-     * guardan (la última de cada tipo) y se aplican al terminar.
+     * Aparición: por defecto «Convergencia» (gotas que se funden y
+     * despierta); `'stream'` es la corriente del inicio de sesión y
+     * `'split'` la división en cuatro gotas (KAI queda oculto al terminar).
+     * Llamarla de nuevo reinicia; se resuelve al terminar o al cancelarse.
+     * Las peticiones de estado y gesto durante la aparición se guardan (la
+     * última de cada tipo) y se aplican al terminar.
      */
-    emerge: () => Promise<KaiEmergeResult>;
+    emerge: (kind?: KaiEmergeKind) => Promise<KaiEmergeResult>;
     /** Termina la aparición ya, desde la pose actual, y aplica lo pendiente. */
     cancelEmerge: () => void;
     pause: () => void;

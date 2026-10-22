@@ -22,6 +22,7 @@ import { R, VIEWBOX } from '@/lib/kai/shape';
 import { MAX_SPRITES, SPRITE_PATHS, STROKED } from '@/lib/kai/sprites';
 import { activeTicks, subscribeTick } from '@/lib/kai/ticker';
 import type {
+    KaiEmergeKind,
     KaiEmergePhase,
     KaiEmergeResult,
     KaiGaze,
@@ -105,7 +106,7 @@ const emit = defineEmits<{
     stateChange: [payload: { from: KaiState; to: KaiState }];
     reactionStart: [payload: { name: KaiReaction }];
     reactionEnd: [payload: KaiReactionResult];
-    emergeStart: [payload: { reduced: boolean }];
+    emergeStart: [payload: { reduced: boolean; kind: KaiEmergeKind }];
     emergePhase: [payload: { phase: KaiEmergePhase }];
     emergeEnd: [payload: KaiEmergeResult];
 }>();
@@ -265,6 +266,8 @@ function render() {
             attr(el, 'cx', s.cx);
             attr(el, 'cy', s.cy);
             attr(el, 'r', s.r);
+            // Gotas con tinte propio (división hacia el navbar).
+            attr(el, 'fill', s.color || url(ids.dots[i % 3]));
         }
 
         if (merged && s.lens > 0) {
@@ -765,11 +768,12 @@ function setState(next: KaiState) {
 }
 
 /**
- * Aparición «Convergencia» en esta instancia (no en las demás). Volver a
- * llamarla reinicia; se resuelve al terminar o al cancelarse.
+ * Aparición en esta instancia (no en las demás): «Convergencia» por
+ * defecto, `'stream'` o `'split'`. Volver a llamarla reinicia; se resuelve
+ * al terminar o al cancelarse.
  */
-function emerge(): Promise<KaiEmergeResult> {
-    const result = engine.emerge();
+function emerge(kind?: KaiEmergeKind): Promise<KaiEmergeResult> {
+    const result = engine.emerge(kind);
     // El escenario se vacía ya, aunque el bucle esté parado.
     render();
     wake();
@@ -862,6 +866,45 @@ function resume() {
     manualPause.value = false;
 }
 
+/** Dirección del viaje en pantalla (radianes; -π/2 = arriba). */
+function setHeading(angle: number) {
+    engine.setHeading(angle);
+    wake();
+}
+
+/**
+ * Posición en pantalla (px) del centro del cuerpo y de las gotas visibles,
+ * con su radio y tinte: sirve para entregar las gotas a otra capa.
+ */
+function screenGeometry() {
+    const rect = root.value?.getBoundingClientRect();
+
+    if (!rect) {
+        return null;
+    }
+
+    const f = engine.frame;
+    const k = rect.width / 144;
+    const map = (x: number, y: number) => ({
+        x: rect.left + (x + 72) * k,
+        y: rect.top + (y + 80) * k,
+    });
+
+    return {
+        scale: k,
+        center: map(f.cx, f.cy),
+        drops: f.sats
+            .map((s, slot) => ({
+                ...map(s.cx, s.cy),
+                r: s.r * k * 0.8,
+                slot,
+                color: s.color,
+                visible: s.visible,
+            }))
+            .filter((d) => d.visible),
+    };
+}
+
 /** Datos de diagnóstico para el laboratorio. */
 function inspect() {
     return {
@@ -883,6 +926,8 @@ defineExpose({
     point,
     emerge,
     cancelEmerge,
+    setHeading,
+    screenGeometry,
     pause,
     resume,
     inspect,

@@ -15,6 +15,14 @@ import {
     nominalTime,
 } from './emerge';
 import type { EmergeContext, EmergeDrop } from './emerge';
+import {
+    SPLIT,
+    STREAM,
+    splitFrame,
+    splitReducedFrame,
+    streamFrame,
+    streamNominal,
+} from './stream';
 import { EYE, FACE_RADIUS, eyeStroke, mouthPath } from './face';
 import { BINS, radiiFromContour, traceField } from './field';
 import type { Ball } from './field';
@@ -51,6 +59,7 @@ import type { EmitOptions, Sprite, SpriteKind } from './sprites';
 import { REACTIONS, STATES } from './states';
 import type { Cue, Rig, RigContext, StateBehavior } from './states';
 import type {
+    KaiEmergeKind,
     KaiEmergePhase,
     KaiEmergeResult,
     KaiEngineEvents,
@@ -89,6 +98,8 @@ export type SatFrame = {
     r: number;
     /** Cuánto asoma fuera del cuerpo (0-1): brillo de esfera propia. */
     lens: number;
+    /** Tinte propio ('' = el de KAI). */
+    color: string;
 };
 export type SpriteFrame = {
     visible: boolean;
@@ -157,9 +168,13 @@ type Sat = {
     pinned: boolean;
     /** Alargamiento con área constante a lo largo de `angle`. */
     stretch: number;
+    /** Alargamiento que pide el rig (las gotas de la aparición lo fijan). */
+    tStretch: number;
     angle: number;
     /** Brillo de esfera propia (0 = integrado, sin borde interno). */
     glass: number;
+    /** Tinte propio (gotas de la división). */
+    color?: string;
 };
 
 type PendingReaction = {
@@ -170,6 +185,7 @@ type PendingReaction = {
 
 /** Aparición en curso. */
 type Emergence = {
+    kind: KaiEmergeKind;
     start: number;
     reduced: boolean;
     phase: KaiEmergePhase | null;
@@ -300,6 +316,11 @@ export class KaiEngine {
     private pointDir: KaiGaze | null = null;
     /** Aparición en curso, o null. */
     private emergence: Emergence | null = null;
+    /** Tras la división no queda nadie: oculto hasta otra aparición. */
+    private vanished = false;
+    /** Dirección de viaje (radianes, pantalla) y la que lleva ahora. */
+    private heading = -0.72;
+    private headingNow = -0.72;
     /** Volumen del cuerpo (radio relativo): la aparición lo va llenando. */
     private mass = 1;
     /** Corrección de volumen de la aparición (1 = ninguna). */
@@ -364,6 +385,7 @@ export class KaiEngine {
             spring: SAT_DEFAULT,
             pinned: false,
             stretch: 1,
+            tStretch: 1,
             angle: 0,
             glass: 1,
         }));
@@ -388,6 +410,7 @@ export class KaiEngine {
                 cy: 0,
                 r: 0,
                 lens: 0,
+                color: '',
             })),
             highlight: { ...blob(), angle: 0 },
             specular: { ...blob(), angle: 0 },
@@ -615,7 +638,9 @@ export class KaiEngine {
     }
 
     /**
-     * Aparición «Convergencia: KAI cobra vida».
+     * Apariciones: «Convergencia: KAI cobra vida» (por defecto), «Una
+     * corriente que cobra vida» (`'stream'`, inicio de sesión) y la
+     * «División» en cuatro gotas de color (`'split'`, hacia el navbar).
      *
      * - Inicio: el escenario se vacía al instante (sin cuerpo ni ojos) y
      *   empieza la coreografía en el reloj del motor (pausa y velocidad
@@ -629,8 +654,11 @@ export class KaiEngine {
      *   pendiente) y empieza una sola secuencia limpia.
      * - Cancelación: `cancelEmerge()` entrega el control desde la pose actual;
      *   las gotas que queden se funden con muelle y se aplica lo pendiente.
+     * - División: no empieza desde vacío sino desde la pose actual, y al
+     *   terminar KAI queda oculto (las gotas ya son de otro) hasta que otra
+     *   aparición o `cancelEmerge()` lo devuelven.
      */
-    emerge(): Promise<KaiEmergeResult> {
+    emerge(kind: KaiEmergeKind = 'converge'): Promise<KaiEmergeResult> {
         if (this.emergence) {
             this.endEmergence(true, false);
         }
@@ -652,13 +680,19 @@ export class KaiEngine {
             s.active = false;
         }
 
+        const split = kind === 'split';
+        this.vanished = false;
+
         for (const sat of this.sats) {
             Object.assign(sat, {
-                active: false,
+                // La división parte del cuerpo tal como está.
+                active: split ? sat.active : false,
                 wanted: false,
                 pinned: false,
                 stretch: 1,
+                tStretch: 1,
                 glass: 1,
+                color: undefined,
             });
         }
 
@@ -669,16 +703,20 @@ export class KaiEngine {
             }
         }
 
-        if (!this.reduced) {
+        if (!this.reduced && !split) {
             Object.assign(this.spring, emergeSprings());
         }
 
-        this.mass = this.reduced ? 1 : 0;
+        if (!split) {
+            this.mass = this.reduced ? 1 : 0;
+            this.presence = 0;
+        }
+
         this.massCorr = 1;
-        this.presence = 0;
 
         return new Promise((resolve) => {
             this.emergence = {
+                kind,
                 start: this.time,
                 reduced: this.reduced,
                 phase: null,
@@ -687,7 +725,12 @@ export class KaiEngine {
                 pendingState: null,
                 pendingReaction: null,
             };
-            this.emit('emergeStart', { reduced: this.reduced });
+            this.emit('emergeStart', { reduced: this.reduced, kind });
+
+            if (split) {
+                // Sigue desde la pose actual, con su inercia.
+                return;
+            }
 
             // Pose inicial sin transición: el escenario empieza vacío.
             this.runRig();
@@ -705,9 +748,19 @@ export class KaiEngine {
 
     /** Termina la aparición ya: el motor sigue desde la pose actual. */
     cancelEmerge(): void {
+        this.vanished = false;
+
         if (this.emergence) {
             this.endEmergence(true, true);
         }
+    }
+
+    /**
+     * Dirección del viaje en pantalla (radianes; 0 = derecha, -π/2 = arriba).
+     * La estela sale en sentido contrario; el cambio se hace con suavidad.
+     */
+    setHeading(angle: number): void {
+        this.heading = angle;
     }
 
     /**
@@ -852,20 +905,26 @@ export class KaiEngine {
 
         if (this.emergence) {
             const run = this.emergence;
-            const length = run.reduced
-                ? EMERGE.reducedDuration
-                : EMERGE.duration;
 
-            if (this.time - run.start >= length) {
+            if (this.time - run.start >= this.emergeLength(run)) {
                 this.endEmergence(false, true);
             }
         }
 
-        if (!this.emergence) {
+        if (this.vanished) {
+            this.presence = 0;
+        } else if (!this.emergence) {
             // Tras una cancelación, volumen y visibilidad vuelven sin saltos.
             this.mass = 1 - (1 - this.mass) * Math.exp(-step * 5);
             this.presence = 1 - (1 - this.presence) * Math.exp(-step * 8);
         }
+
+        // La dirección de viaje gira con suavidad (por el camino corto).
+        const turn = Math.atan2(
+            Math.sin(this.heading - this.headingNow),
+            Math.cos(this.heading - this.headingNow),
+        );
+        this.headingNow += turn * Math.min(1, step * 5);
 
         if (this.waves.length) {
             this.waves = this.waves.filter((w) => this.time - w.born < 1.6);
@@ -1059,8 +1118,18 @@ export class KaiEngine {
 
         // El reposo entra en la ventana tranquila de su ciclo: los lóbulos
         // brotan después, despacio, en lugar de salir todos a la vez.
-        if (!cancelled && this.stateName === 'idle') {
+        if (!cancelled && this.stateName === 'idle' && run.kind !== 'split') {
             this.stateStart -= EMERGE.idleOffset;
+        }
+
+        // Tras dividirse, las gotas ya pertenecen al navbar.
+        if (!cancelled && run.kind === 'split') {
+            this.vanished = true;
+            this.presence = 0;
+
+            for (const sat of this.sats) {
+                sat.active = false;
+            }
         }
 
         const { pendingState, pendingReaction } = run;
@@ -1088,6 +1157,18 @@ export class KaiEngine {
         }
     }
 
+    private emergeLength(run: Emergence): number {
+        if (run.kind === 'split') {
+            return run.reduced ? SPLIT.reducedDuration : SPLIT.duration;
+        }
+
+        if (run.reduced) {
+            return EMERGE.reducedDuration;
+        }
+
+        return run.kind === 'stream' ? STREAM.duration : EMERGE.duration;
+    }
+
     private runEmergence(): void {
         const run = this.emergence as Emergence;
         const elapsed = this.time - run.start;
@@ -1097,9 +1178,19 @@ export class KaiEngine {
         ctx.body.x = center.x / R;
         ctx.body.y = center.y / R;
 
-        const phase = run.reduced
-            ? emergeReducedFrame(elapsed, ctx)
-            : emergeFrame(nominalTime(elapsed), ctx);
+        let phase: KaiEmergePhase;
+
+        if (run.kind === 'split') {
+            phase = run.reduced
+                ? splitReducedFrame(elapsed, ctx)
+                : splitFrame(elapsed, ctx);
+        } else if (run.reduced) {
+            phase = emergeReducedFrame(elapsed, ctx);
+        } else if (run.kind === 'stream') {
+            phase = streamFrame(streamNominal(elapsed), ctx);
+        } else {
+            phase = emergeFrame(nominalTime(elapsed), ctx);
+        }
 
         if (phase !== run.phase) {
             run.phase = phase;
@@ -1215,8 +1306,10 @@ export class KaiEngine {
             spring: ABSORB,
             falloff: undefined,
             stretch: drop.stretch,
+            tStretch: drop.stretch,
             angle: drop.angle,
             glass: drop.glass,
+            color: drop.color,
         });
     }
 
@@ -1273,8 +1366,12 @@ export class KaiEngine {
             ambient: true,
             gx: 0,
             gy: 0,
+            heading: this.headingNow,
             sat: polar,
             satXY: cartesian,
+            trail: (slot, x, y, r, stretch, angle, spring) => {
+                this.wantSat(slot, x, y, r, spring, undefined, stretch, angle);
+            },
             set: (ch, value) => {
                 this.overrides[ch] = value;
             },
@@ -1318,6 +1415,8 @@ export class KaiEngine {
         r: number,
         spring?: SpringConfig,
         falloff?: number,
+        stretch = 1,
+        angle = 0,
     ): void {
         const sat = this.sats[slot];
 
@@ -1349,6 +1448,12 @@ export class KaiEngine {
         sat.tr = Math.max(0, r) * R * k;
         sat.spring = spring ?? SAT_DEFAULT;
         sat.falloff = falloff;
+        sat.tStretch = stretch;
+        sat.color = undefined;
+
+        if (stretch !== 1) {
+            sat.angle = angle;
+        }
     }
 
     private emitRelative(kind: SpriteKind, o: EmitOptions): void {
@@ -1410,6 +1515,7 @@ export class KaiEngine {
             ctx.engaged = this.look !== null || this.grabPoint !== null;
             ctx.gx = this.value.gx;
             ctx.gy = this.value.gy;
+            ctx.heading = this.headingNow;
             rig(ctx);
         }
 
@@ -1479,9 +1585,11 @@ export class KaiEngine {
                 continue;
             }
 
-            // Fuera de la aparición vuelve a ser una gota redonda de vidrio.
+            // Fuera de la aparición vuelve a ser una gota de vidrio, redonda
+            // salvo que el rig la alargue (estelas).
             const relax = Math.min(1, dt * 8);
-            sat.stretch += (1 - sat.stretch) * relax;
+            const stretch = sat.wanted ? sat.tStretch : 1;
+            sat.stretch += (stretch - sat.stretch) * relax;
             sat.glass += (1 - sat.glass) * relax;
 
             if (!sat.wanted) {
@@ -1858,6 +1966,7 @@ export class KaiEngine {
 
             out.cx = n2(sat.x);
             out.cy = n2(sat.y);
+            out.color = sat.color ?? '';
 
             if (out.dot) {
                 // Más pequeño que la rejilla: gotita aparte, siempre redonda.
@@ -1896,6 +2005,26 @@ export class KaiEngine {
             minY = Math.min(minY, sat.y - span);
             maxY = Math.max(maxY, sat.y + span);
         });
+
+        // Gotas que se solapan suman campo: la silueta conjunta puede salirse
+        // del contorno del cuerpo. Caja con el radio del volumen sumado.
+        let volume = 0;
+
+        for (let i = 0; i < BINS; i++) {
+            volume = Math.max(volume, this.radii[i]);
+        }
+
+        volume = volume ** 3;
+
+        for (const ball of this.balls) {
+            volume += (ball.r * Math.max(1, ball.stretch ?? 1)) ** 3;
+        }
+
+        const reach = Math.cbrt(volume) * 1.08;
+        minX = Math.min(minX, origin.x - reach);
+        maxX = Math.max(maxX, origin.x + reach);
+        minY = Math.min(minY, origin.y - reach);
+        maxY = Math.max(maxY, origin.y + reach);
 
         const pad = this.cell * 2 + 2;
         const traced = traceField(

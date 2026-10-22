@@ -21,7 +21,14 @@ import {
     X,
 } from '@lucide/vue';
 import type { Component } from 'vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+} from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -41,6 +48,7 @@ import {
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';
+import { arrivalPending, onNavbarReady } from '@/lib/kai/arrival';
 import { dashboard } from '@/routes';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
@@ -288,7 +296,30 @@ function onSearchBlur() {
     }
 }
 
+/* ── Llegada desde el inicio de sesión ─────────────────────────────── */
+// Las gotas de KAI forman la cápsula sobre la página: la barra real espera
+// oculta y aparece cuando la cápsula está completa; después, los controles.
+const arriving = ref(arrivalPending());
+const arrived = ref(false);
+let offReady: (() => void) | undefined;
+let arrivalTimer: number | undefined;
+
+function revealBar() {
+    offReady?.();
+    window.clearTimeout(arrivalTimer);
+    arriving.value = false;
+    arrived.value = true;
+    arrivalTimer = window.setTimeout(() => (arrived.value = false), 1600);
+    nextTick(() => measurePill());
+}
+
 onMounted(() => {
+    if (arriving.value) {
+        offReady = onNavbarReady(revealBar);
+        // Por si la llegada no termina (pestaña oculta, error): nunca sin barra.
+        arrivalTimer = window.setTimeout(revealBar, 6000);
+    }
+
     measurePill();
     requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -304,6 +335,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    offReady?.();
+    window.clearTimeout(arrivalTimer);
     cancelAnimationFrame(trackFrame);
     cancelAnimationFrame(moveFrame);
     window.clearTimeout(focusTimer);
@@ -312,7 +345,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div class="kn-root">
+    <div
+        class="kn-root"
+        :class="{ 'is-arriving': arriving, 'is-arrived': arrived }"
+    >
         <header class="kn-header">
             <div class="kn-shell">
                 <nav
@@ -364,7 +400,10 @@ onBeforeUnmount(() => {
                             </SheetHeader>
 
                             <div class="kn-sheet-body">
-                                <nav class="kn-sheet-nav" aria-label="Secciones">
+                                <nav
+                                    class="kn-sheet-nav"
+                                    aria-label="Secciones"
+                                >
                                     <template
                                         v-for="entry in navEntries"
                                         :key="entry.key"
@@ -959,6 +998,45 @@ onBeforeUnmount(() => {
 
 .kn-right.kn-enter {
     animation-delay: 0.24s;
+}
+
+/* ── Llegada: la barra espera a la cápsula de KAI ─────────────────────── */
+.kn-root.is-arriving .kn-header,
+.kn-root.is-arrived .kn-header {
+    /* Sobre el telón de la llegada, bajo la capa de las gotas. */
+    z-index: 70;
+}
+
+.kn-root.is-arriving .kn-bar {
+    opacity: 0;
+    animation: none;
+}
+
+.kn-root.is-arriving .kn-enter,
+.kn-root.is-arriving .kn-burger {
+    opacity: 0;
+    animation: none;
+}
+
+.kn-root.is-arrived .kn-bar {
+    animation: kn-arrive 0.32s ease-out backwards;
+}
+
+.kn-root.is-arrived .kn-enter,
+.kn-root.is-arrived .kn-burger {
+    animation-name: kn-item-arrive;
+}
+
+.kn-root.is-arrived .kn-logo.kn-enter {
+    animation-delay: 0.12s;
+}
+
+.kn-root.is-arrived .kn-links.kn-enter {
+    animation-delay: 0.2s;
+}
+
+.kn-root.is-arrived .kn-right.kn-enter {
+    animation-delay: 0.28s;
 }
 
 /* ── Logo ───────────────────────────────────────────────────────────── */
@@ -1897,6 +1975,19 @@ onBeforeUnmount(() => {
     from {
         opacity: 0;
         transform: translateY(-6px);
+    }
+}
+
+@keyframes kn-arrive {
+    from {
+        opacity: 0;
+    }
+}
+
+@keyframes kn-item-arrive {
+    from {
+        opacity: 0;
+        transform: translateY(4px) scale(0.96);
     }
 }
 

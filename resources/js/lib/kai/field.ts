@@ -21,6 +21,12 @@ export type Ball = {
     stretch?: number;
     c?: number;
     s?: number;
+    /**
+     * Tramo: si se da (`x2`, `y2`), la gota es una cápsula del punto (x, y)
+     * a este, de radio `r` (el campo mide la distancia al segmento).
+     */
+    x2?: number;
+    y2?: number;
 };
 
 export type BodyField = {
@@ -249,7 +255,19 @@ export function traceField(
                 const ey = y - ball.y;
                 let d2 = ex * ex + ey * ey;
 
-                if (ball.stretch) {
+                if (ball.x2 !== undefined && ball.y2 !== undefined) {
+                    // Distancia al segmento: el tramo se funde como una gota.
+                    const sx = ball.x2 - ball.x;
+                    const sy = ball.y2 - ball.y;
+                    const len2 = sx * sx + sy * sy || 1;
+                    const u = Math.max(
+                        0,
+                        Math.min(1, (ex * sx + ey * sy) / len2),
+                    );
+                    const px = ex - sx * u;
+                    const py = ey - sy * u;
+                    d2 = px * px + py * py;
+                } else if (ball.stretch) {
                     // En los ejes de la gota: larga en `u`, estrecha en `v`.
                     const a = ball.stretch;
                     const u = ex * (ball.c ?? 1) + ey * (ball.s ?? 0);

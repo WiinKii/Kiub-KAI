@@ -64,6 +64,16 @@ export const STATE_CATALOG: Record<KaiState, CatalogEntry> = {
         label: 'Aviso',
         description: 'Tiene algo para ti: mira el globito, lo señala y salta.',
     },
+    travel: {
+        label: 'Viaje',
+        description:
+            'Se inclina hacia arriba a la derecha y su espalda se estira en una estela líquida.',
+    },
+    rush: {
+        label: 'Impulso',
+        description:
+            'Se comprime y se lanza: el cuerpo se alarga, la estela crece y un pulso de luz la recorre.',
+    },
 };
 
 export const REACTION_CATALOG: Record<KaiReaction, CatalogEntry> = {
@@ -140,15 +150,19 @@ export const STATE_GROUPS: { label: string; states: KaiState[] }[] = [
         ],
     },
     { label: 'Emociones', states: ['content', 'music', 'sleeping', 'shy'] },
+    { label: 'Viaje', states: ['travel', 'rush'] },
 ];
 
-/** Nombres de las fases de la aparición «Convergencia». */
+/** Nombres de las fases de las apariciones. */
 export const EMERGE_PHASE_LABELS: Record<KaiEmergePhase, string> = {
     pulse: 'Primer pulso',
     attraction: 'Atracción',
     fusion: 'Fusión',
+    current: 'Entrada con impulso',
+    fold: 'Giro y pliegue',
     awakening: 'Despertar',
     recognition: 'Reconocimiento',
+    split: 'División',
     gentle: 'Aparición suave',
 };
 
@@ -157,6 +171,14 @@ export const EMERGE_STEPS: KaiEmergePhase[] = [
     'pulse',
     'attraction',
     'fusion',
+    'awakening',
+    'recognition',
+];
+
+/** Fases de la corriente del inicio de sesión, en orden. */
+export const STREAM_STEPS: KaiEmergePhase[] = [
+    'current',
+    'fold',
     'awakening',
     'recognition',
 ];

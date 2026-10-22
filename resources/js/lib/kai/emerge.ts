@@ -61,6 +61,8 @@ export type EmergeDrop = {
     angle: number;
     /** Brillo de esfera propia: 1 suelta, 0 integrada (sin bordes internos). */
     glass: number;
+    /** Tinte propio (p. ej. las gotas del navbar); por defecto, el de KAI. */
+    color?: string;
 };
 
 /** Lo que el motor ofrece a la coreografía en cada fotograma. */
