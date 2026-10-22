@@ -63,8 +63,8 @@ funden y KAI despierta.
 La **pantalla de inicio de sesión** (`resources/js/pages/auth/Login.vue`) usa
 la autenticación real de Fortify y presenta a KAI: entra como una corriente que
 cobra vida y saluda, viaja con una estela blanca al pasar por «Ingresar», se
-impulsa al enviar y, si el acceso es correcto, sale en una curva y choca contra
-el navbar, que se forma con su líquido. De momento solo se muestra en el laboratorio de
+impulsa al enviar y, si el acceso es correcto, sale disparado del recuadro; el
+navbar se crea y KAI llega a su sitio en la intranet, abajo a la derecha. De momento solo se muestra en el laboratorio de
 desarrollo **`/dev/kai`** (aparición, colores, boca, rubor, juegos y todos los
 estados), que se registra únicamente
 en local (`routes/dev.php`, incluido desde `routes/web.php`).

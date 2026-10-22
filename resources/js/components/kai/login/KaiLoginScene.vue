@@ -15,9 +15,8 @@
  * - `launch()`: se comprime y se impulsa; el entorno acelera y un pulso de
  *   luz recorre la estela (estado «Impulso»), lo que dure la validación.
  * - `fail()`: frena, recoge la estela y muestra el error junto al formulario.
- * - `depart()`: sale del panel describiendo una curva amplia, con la estela
- *   siguiendo su recorrido, y choca contra el navbar; la capa de llegada
- *   (`lib/kai/arrival`) convierte el choque en la barra.
+ * - `depart()`: como al final de la referencia, acelera en su dirección y
+ *   sale del recuadro; la estela pasa tras él y queda la galaxia.
  *
  * Todo parte de la pose actual: entrar y salir del botón a medias continúa
  * desde donde está, sin reinicios.
@@ -29,7 +28,6 @@ import {
 } from '@vueuse/core';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import KaiCharacter from '@/components/kai/KaiCharacter.vue';
-import { measureBar, playArrival } from '@/lib/kai/arrival';
 import { subscribeTick } from '@/lib/kai/ticker';
 import type { KaiEmergePhase, KaiReaction, KaiState } from '@/lib/kai/types';
 import { createTravelLayers } from './useTravelLayers';
@@ -41,10 +39,13 @@ const emit = defineEmits<{
     phase: [phase: KaiEmergePhase | null];
 }>();
 
-/** Dirección del viaje (pantalla): hacia la derecha y un poco hacia arriba. */
-const HEADING = -0.26;
+/**
+ * Dirección del viaje (pantalla): de izquierda a derecha y hacia abajo,
+ * como en la referencia (≈ 32°).
+ */
+const HEADING = 0.55;
 /** Velocidades del entorno. */
-const SPEED = { rest: 0.35, travel: 1.3, rush: 2.8, depart: 3.6 };
+const SPEED = { rest: 0.35, travel: 1.3, rush: 2.1, depart: 3 };
 /** Gestos espontáneos en reposo: cada cuánto (ms) y cuáles. */
 const MOOD_EVERY: [number, number] = [6500, 10500];
 /** Tras esta pausa sin escribir (ms), deja de mirar el campo. */
@@ -82,10 +83,8 @@ const size = computed(() =>
 
 const state = ref<KaiState>('idle');
 const appearing = ref(true);
-/** El panel recorta a KAI (la corriente entra desde fuera); al salir, no. */
-const clipped = ref(true);
 const departing = ref(false);
-/** Tras el choque, KAI es la barra (capa de llegada). */
+/** Tras salir del recuadro, KAI ya no se dibuja. */
 const hidden = ref(false);
 /** Movimiento reducido: KAI se desvanece en su sitio. */
 const fading = ref(false);
@@ -139,7 +138,8 @@ function tick(dt: number) {
     const rect = root.value?.getBoundingClientRect();
     trail?.frame(
         Math.min(dt, 0.05),
-        hidden.value ? null : kaiHead(),
+        // Aunque ya no se dibuje (salió del recuadro), la estela lo sigue.
+        kaiHead(),
         heading,
         rect ? { rect, radius: panelRadius } : null,
         layers?.speed ?? 1,
@@ -414,34 +414,14 @@ function animate(duration: number, step: (u: number) => void): Promise<void> {
     });
 }
 
-function smooth(u: number): number {
-    const x = Math.max(0, Math.min(1, u));
-
-    return x * x * (3 - 2 * x);
-}
-
-type Point = { x: number; y: number };
-
-function bezier(p: Point[], t: number): Point {
-    const m = 1 - t;
-    const a = m * m * m;
-    const b = 3 * m * m * t;
-    const c = 3 * m * t * t;
-    const d = t * t * t;
-
-    return {
-        x: a * p[0].x + b * p[1].x + c * p[2].x + d * p[3].x,
-        y: a * p[0].y + b * p[1].y + c * p[2].y + d * p[3].y,
-    };
-}
-
 /**
- * Acceso concedido: KAI sale del panel en una curva amplia (a la derecha,
- * sube y vuelve hacia el centro) y choca contra el navbar desde abajo. Se
- * resuelve cuando la capa de llegada ya cubre la página (el destino puede
- * montarse debajo).
+ * Acceso concedido, como al final de la referencia: KAI acelera en su
+ * dirección y sale del recuadro (dentro del panel, que lo recorta); la
+ * estela pasa tras él y queda la galaxia. Se resuelve al terminar; la
+ * página se encarga después de apartar el contenedor y presentar la
+ * intranet.
  */
-async function depart(background: string): Promise<void> {
+async function depart(): Promise<void> {
     departing.value = true;
     busy = true;
     window.clearTimeout(errorTimer);
@@ -455,90 +435,41 @@ async function depart(background: string): Promise<void> {
     }
 
     const head = kaiHead();
-    const bar = measureBar();
+    const panel = root.value?.getBoundingClientRect();
 
-    if (reduced.value || !head) {
+    if (reduced.value || !head || !panel) {
         fading.value = true;
         await sleep(250);
-        void playArrival({ background, reduced: true });
 
         return;
     }
 
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const end = { x: bar.left + bar.width / 2, y: bar.top + bar.height / 2 };
-    // Recorrido como en el boceto: sale hacia la derecha, se eleva por el
-    // lado y entra al navbar desde abajo.
-    // El lazo se adapta a la pantalla y no se sale del encuadre.
-    const margin = head.r * 1.8;
-    const path: Point[] = [
-        { x: head.x, y: head.y },
-        { x: Math.min(vw - margin, head.x + vw * 0.48), y: head.y + 30 },
-        {
-            x: Math.min(vw - margin, end.x + vw * 0.34),
-            y: Math.min(
-                vh - margin,
-                end.y + vh * 0.46,
-                head.y + Math.max(80, vh * 0.12),
-            ),
-        },
-        end,
-    ];
-    // La estela parte de donde está: hasta el borde del panel.
-    const panel = root.value?.getBoundingClientRect();
-    const back = heading + Math.PI;
-    let reach = 0;
+    // Distancia hasta salir del todo por el borde del panel.
+    const ux = Math.cos(heading);
+    const uy = Math.sin(heading);
+    const tx =
+        ux > 0 ? (panel.right - head.x) / ux : (panel.left - head.x) / ux;
+    const ty =
+        uy > 0 ? (panel.bottom - head.y) / uy : (panel.top - head.y) / uy;
+    const distance = Math.min(tx, ty) + head.r * 2.6;
 
-    if (panel) {
-        const ux = Math.cos(back);
-        const uy = Math.sin(back);
-        const tx =
-            ux < 0 ? (panel.left - head.x) / ux : (panel.right - head.x) / ux;
-        const ty =
-            uy < 0 ? (panel.top - head.y) / uy : (panel.bottom - head.y) / uy;
-        reach = Math.max(0, Math.min(tx, ty));
-    }
-
-    trail?.setRush(0);
-    trail?.follow(true, head, heading, reach);
-    clipped.value = false;
     layers?.setSpeed(SPEED.depart);
+    trail?.setRush(0);
 
-    // Al llegar, su diámetro es algo mayor que la altura de la barra.
-    const scale = Math.max(0.3, Math.min(0.9, (bar.height * 0.62) / head.r));
-    let previous = path[0];
-
-    await animate(1050, (u) => {
-        // Arranca con fuerza y llega aún rápido: así se nota el choque.
-        const s = 1.55 * u * u - 0.55 * u * u * u;
-        const p = bezier(path, Math.min(1, s));
-        const angle = Math.atan2(p.y - previous.y, p.x - previous.x);
-
-        if (Math.hypot(p.x - previous.x, p.y - previous.y) > 0.5) {
-            setHeading(angle);
-        }
-
-        previous = p;
+    // Arranca suave y acelera fuerte: se va disparado.
+    await animate(430, (u) => {
+        const e = u * u * u;
         lift.value = {
-            x: p.x - path[0].x,
-            y: p.y - path[0].y,
-            scale: 1 + (scale - 1) * smooth(u * 1.15),
+            x: ux * distance * e,
+            y: uy * distance * e,
+            scale: 1 + 0.14 * e,
         };
     });
 
-    // Choque: en el mismo fotograma, la capa de llegada toma el relevo.
-    const impact = kaiHead() ?? { x: end.x, y: end.y, r: head.r * scale };
-    void playArrival({
-        background,
-        impact: { x: impact.x, y: impact.y, r: impact.r },
-        trail: trail?.snapshot() ?? [],
-    });
-    // La capa dibuja su primer fotograma antes que este: sin hueco.
-    requestAnimationFrame(() => {
-        hidden.value = true;
-        trail?.clear();
-    });
+    // La cola de la estela pasa rápido por el panel y queda la galaxia.
+    hidden.value = true;
+    trail?.setAmount(0, 5.5);
+    await sleep(520);
 }
 
 function onEmergeEnd() {
@@ -605,11 +536,7 @@ onBeforeUnmount(() => {
 
         <canvas ref="trailCanvas" class="kls-trail" aria-hidden="true" />
 
-        <div
-            class="kls-kai-layer"
-            :class="{ 'is-clipped': clipped }"
-            aria-hidden="true"
-        >
+        <div class="kls-kai-layer" aria-hidden="true">
             <div
                 ref="kaiBox"
                 class="kls-kai"
@@ -656,18 +583,20 @@ onBeforeUnmount(() => {
 .kls-galaxy {
     position: absolute;
     inset: 0;
+    /* Azul noche arriba, violeta abajo: los tonos de la referencia. */
     background:
         radial-gradient(
-            120% 80% at 20% 0%,
-            rgba(92, 157, 255, 0.38),
+            110% 70% at 15% 0%,
+            rgba(30, 70, 190, 0.45),
             transparent 60%
         ),
-        radial-gradient(
-            90% 70% at 100% 100%,
-            rgba(122, 104, 255, 0.32),
-            transparent 65%
-        ),
-        linear-gradient(160deg, #1b2440 0%, #151924 55%, #10131c 100%);
+        linear-gradient(
+            180deg,
+            #112565 0%,
+            #1a2067 42%,
+            #2d1866 74%,
+            #381266 100%
+        );
     opacity: 0;
     transition: opacity 0.5s ease;
 }
@@ -716,9 +645,7 @@ onBeforeUnmount(() => {
     z-index: 5;
     border-radius: inherit;
     pointer-events: none;
-}
-
-.kls-kai-layer.is-clipped {
+    /* El panel recorta a KAI: entra y sale por sus bordes. */
     clip-path: inset(0 round var(--kls-radius, 28px));
 }
 
@@ -727,7 +654,17 @@ onBeforeUnmount(() => {
     top: 54%;
     left: 50%;
     transform-origin: 50% 55.6%;
+    transition:
+        left 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+        top 0.7s cubic-bezier(0.22, 1, 0.36, 1);
     will-change: transform;
+}
+
+/* De viaje se coloca algo a la derecha, como en la referencia: la estela
+   tiene sitio y KAI parece avanzar. */
+.kls.is-galaxy .kls-kai {
+    top: 52%;
+    left: 57%;
 }
 
 .kls-kai.is-hidden {
@@ -737,10 +674,6 @@ onBeforeUnmount(() => {
 .kls-kai.is-fading {
     opacity: 0;
     transition: opacity 0.25s ease;
-}
-
-.kls.is-departing .kls-backdrop {
-    opacity: 0;
 }
 
 /* En el espacio no hay suelo: sin sombra mientras viaja. */

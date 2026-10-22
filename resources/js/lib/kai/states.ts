@@ -506,23 +506,27 @@ function travelPose(
 ): void {
     const fx = Math.cos(c.heading);
     const fy = Math.sin(c.heading);
-    // Inclinación del cuerpo: 0 cuando viaja hacia arriba.
-    const tilt = Math.atan2(fx, -fy);
     const ahead = 0.08 * amount - 0.12 * recoil + 0.05 * push;
-    c.set('rot', tilt * (0.1 * amount + 0.03 * push));
+    // Casi de frente: solo un leve giro hacia el lado al que va.
+    c.set('rot', fx * (0.06 * amount + 0.02 * push));
     c.set('lean', fx * (0.05 * amount - 0.06 * recoil + 0.03 * push));
     c.set('bx', fx * ahead);
     c.set('by', fy * ahead);
     c.set('x', fx * (0.03 * amount - 0.06 * recoil + 0.04 * push));
     c.set('y', fy * (0.03 * amount - 0.06 * recoil + 0.04 * push));
     c.set('sx', 1 - 0.03 * amount + 0.08 * recoil - 0.03 * push);
+    // Viaja también hacia delante: se acerca un poco a la cámara.
+    c.set('scale', 1 + 0.05 * amount + 0.03 * push - 0.05 * recoil);
 }
 
-/** Mirada hacia donde va, con un vaivén mínimo para que no sea fija. */
+/**
+ * Mirada: al frente con un poco hacia el lado al que va (como quien viaja
+ * hacia la cámara), con un vaivén mínimo para que no sea fija.
+ */
 function lookAhead(c: RigContext, amount: number): void {
     const sway = 0.04 * Math.sin(c.t * 1.7);
-    c.set('gx', Math.cos(c.heading) * 0.72 * amount + sway);
-    c.set('gy', Math.sin(c.heading) * 0.55 * amount);
+    c.set('gx', Math.cos(c.heading) * 0.42 * amount + sway);
+    c.set('gy', (Math.sin(c.heading) * 0.12 - 0.08) * amount);
 }
 
 const travelRig: Rig = (c) => {
@@ -546,7 +550,6 @@ const rushRig: Rig = (c) => {
     const push = smooth(0.12, 0.3, c.t);
     travelPose(c, 1, squeeze * 0.9, push);
     c.set('flat', 0.3 * squeeze);
-    c.set('scale', 1 - 0.05 * squeeze);
     lookAhead(c, 1);
     c.set('wob', 1.5);
     c.set('flow', 2.6);
@@ -1008,8 +1011,8 @@ export const STATES: Record<KaiState, StateDef> = {
         // Pose para movimiento reducido (sin estela): la dirección por defecto.
         pose: {
             ...OPEN,
-            gx: 0.62,
-            gy: -0.18,
+            gx: 0.36,
+            gy: -0.03,
             lean: 0.04,
             rot: 0.04,
             sx: 0.97,
@@ -1049,8 +1052,8 @@ export const STATES: Record<KaiState, StateDef> = {
     rush: {
         pose: {
             ...OPEN,
-            gx: 0.68,
-            gy: -0.2,
+            gx: 0.38,
+            gy: -0.03,
             lean: 0.05,
             rot: 0.05,
             sx: 0.96,

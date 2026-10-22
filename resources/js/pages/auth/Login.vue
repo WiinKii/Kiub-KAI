@@ -5,7 +5,9 @@
  * Usa la autenticación real del proyecto (Fortify: `store`, recordar
  * sesión, recuperar contraseña, passkeys y registro si están activos) y le
  * suma a KAI: aparece como una corriente, viaja al pasar por «Ingresar», se
- * impulsa al enviar y, si el acceso es correcto, sube y forma el navbar.
+ * impulsa al enviar y, si el acceso es correcto, sale disparado del
+ * recuadro. Después el contenedor se aparta, la intranet presenta su navbar
+ * y KAI llega a su sitio, abajo a la derecha.
  *
  * Para encadenar la salida con la página de destino, la respuesta de un
  * acceso correcto se retiene (interceptor de Inertia) hasta que la capa de
@@ -14,7 +16,8 @@
 import { interceptors } from '@inertiajs/core';
 import { Form, Head } from '@inertiajs/vue3';
 import { AlertCircle } from '@lucide/vue';
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { usePreferredReducedMotion } from '@vueuse/core';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import InputError from '@/components/InputError.vue';
 import KaiLoginScene from '@/components/kai/login/KaiLoginScene.vue';
@@ -25,7 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import BareLayout from '@/layouts/BareLayout.vue';
-import { beginDeparture } from '@/lib/kai/arrival';
+import { beginDeparture, playArrival } from '@/lib/kai/arrival';
 /* @chisel-registration */
 import { register } from '@/routes';
 /* @end-chisel-registration */
@@ -49,7 +52,12 @@ const MAX_HOLD = 7000;
 
 const scene = ref<InstanceType<typeof KaiLoginScene> | null>(null);
 const button = ref<HTMLButtonElement | null>(null);
-const departing = ref(false);
+/** Acceso concedido: KAI se va (el botón dice «Entrando…»). */
+const entering = ref(false);
+/** El contenedor se aparta antes de presentar la intranet. */
+const leaving = ref(false);
+const prefersReduced = usePreferredReducedMotion();
+const reduced = computed(() => prefersReduced.value === 'reduce');
 let submitting = false;
 let offInterceptor: (() => void) | undefined;
 
@@ -146,13 +154,21 @@ onMounted(() => {
             return response;
         }
 
-        departing.value = true;
+        entering.value = true;
         beginDeparture();
 
         await Promise.race([
-            scene.value?.depart(BACKGROUND).catch(() => undefined),
+            scene.value?.depart().catch(() => undefined),
             new Promise((resolve) => window.setTimeout(resolve, MAX_HOLD)),
         ]);
+
+        // El contenedor se aparta y la capa de llegada toma el relevo con el
+        // mismo color de fondo: el destino se monta debajo.
+        leaving.value = true;
+        await new Promise((resolve) =>
+            window.setTimeout(resolve, reduced.value ? 150 : 420),
+        );
+        void playArrival({ background: BACKGROUND, reduced: reduced.value });
 
         return response;
     });
@@ -165,7 +181,7 @@ onBeforeUnmount(() => offInterceptor?.());
     <Head title="Iniciar sesión" />
 
     <div class="kl" :style="{ '--kl-bg': BACKGROUND }">
-        <main class="kl-card" :class="{ 'is-departing': departing }">
+        <main class="kl-card" :class="{ 'is-leaving': leaving }">
             <section class="kl-scene" aria-label="KAI te da la bienvenida">
                 <KaiLoginScene ref="scene" />
             </section>
@@ -278,9 +294,9 @@ onBeforeUnmount(() => offInterceptor?.());
                             ref="button"
                             type="submit"
                             class="kl-submit"
-                            :class="{ 'is-busy': processing || departing }"
-                            :disabled="processing || departing"
-                            :aria-busy="processing || departing"
+                            :class="{ 'is-busy': processing || entering }"
+                            :disabled="processing || entering"
+                            :aria-busy="processing || entering"
                             data-test="login-button"
                             @pointerenter="onButtonEnter"
                             @pointerleave="onButtonLeave"
@@ -292,11 +308,11 @@ onBeforeUnmount(() => offInterceptor?.());
                             <span class="kl-submit-sheen" aria-hidden="true" />
                             <span class="kl-submit-label">
                                 <Spinner
-                                    v-if="processing || departing"
+                                    v-if="processing || entering"
                                     class="kl-spinner"
                                 />
                                 {{
-                                    departing
+                                    entering
                                         ? 'Entrando…'
                                         : processing
                                           ? 'Validando…'
@@ -622,14 +638,16 @@ onBeforeUnmount(() => offInterceptor?.());
     text-align: center;
 }
 
-/* Salida: el formulario y el contenedor se apartan; KAI queda. */
-.kl-card.is-departing::before {
-    opacity: 0;
+/* Salida: KAI ya se fue; el contenedor entero se aparta con suavidad. */
+.kl-card {
+    transition:
+        opacity 0.4s ease,
+        transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.kl-card.is-departing .kl-panel {
+.kl-card.is-leaving {
     opacity: 0;
-    transform: translateY(8px);
+    transform: scale(0.985) translateY(6px);
 }
 
 @keyframes kl-sheen {

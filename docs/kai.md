@@ -54,8 +54,9 @@ En el laboratorio:
 | `resources/js/lib/kai/palette.ts` | Colores, preajustes y tonos derivados (`--kai-*`). |
 | `resources/js/lib/kai/emerge.ts` | Aparición «Convergencia»: parámetros, fases y coreografía (función del tiempo). |
 | `resources/js/lib/kai/stream.ts` | Aparición «Una corriente que cobra vida» (inicio de sesión). |
-| `resources/js/lib/kai/arrival.ts` | Llegada: KAI choca contra el navbar y su líquido forma la barra sobre la página de destino. |
-| `resources/js/lib/kai/ribbon.ts` | Estela blanca plana (cinta 2D) compartida por la escena y la llegada. |
+| `resources/js/lib/kai/arrival.ts` | Llegada a la intranet tras el acceso: telón, aviso al navbar para crearse y aviso a KAI para entrar a su sitio. |
+| `resources/js/lib/kai/ribbon.ts` | Estela blanca plana (cinta 2D) del inicio de sesión. |
+| `resources/js/components/kai/dockOwners.ts` | Cuenta los KAI flotantes que monta una página: el de la intranet se aparta si hay uno. |
 | `resources/js/pages/auth/Login.vue` | Inicio de sesión de Kiub (Fortify) con la escena de KAI. |
 | `resources/js/components/kai/login/*` | Escena del inicio de sesión (`KaiLoginScene.vue`), galaxia en `<canvas>` (`useTravelLayers.ts`) y estela blanca (`useWhiteTrail.ts`). |
 | `resources/js/layouts/BareLayout.vue` | Layout sin marco para páginas que dibujan toda la pantalla. |
@@ -174,6 +175,7 @@ const tamano = ref<KaiDockSize>('normal');
 | `guide` | `KaiGuide` | `KIUB_GUIDE` | Contenido del chat (`lib/kai/guide.ts`). |
 | `section` | `string` | `''` | Sección actual (id de la guía). Vacío: se deduce de la URL al abrir el chat. |
 | `notices` | `KaiNotice[]` | `[]` | Avisos sin leer: globito con el número sobre KAI, estado «Aviso» y primer mensaje del chat. |
+| `app` | `boolean` | `false` | Lo monta la intranet (lo hace `AppHeader`). Si una página monta el suyo, este se aparta. Tras iniciar sesión entra desde el borde derecho y saluda. |
 | `colors`, `mouth`, `intensity`, `paused`, `reducedMotion` | — | — | Igual que en `KaiCharacter`. |
 
 Además, mira al cursor cuando se acerca y, al desplazarse la página, la masa
@@ -275,7 +277,7 @@ fotograma: sirven para estilos y pruebas.
 | Dormido | `sleeping` | Respira hondo, se asienta y suelta zetas. |
 | Tímido | `shy` | Se encoge, se sonroja, pone las manitas junto a las mejillas y mira de reojo. |
 | Aviso | `notice` | Tiene algo para ti: mira el globito, alza una manita a su lado, te mira y da un saltito de vez en cuando. El KAI flotante lo usa solo con avisos pendientes. |
-| Viaje | `travel` | Retrocede un instante y se inclina hacia la dirección de viaje; apenas se deforma por la velocidad (el frente se abomba), sin estirarse. La estela la dibuja quien lo usa (inicio de sesión). |
+| Viaje | `travel` | Retrocede un instante y avanza hacia donde va, casi de frente (como viajando hacia la cámara: se acerca un poco y mira al frente, algo hacia el lado al que va); apenas se deforma por la velocidad, sin estirarse. La estela la dibuja quien lo usa (inicio de sesión). |
 | Impulso | `rush` | Se comprime y se lanza hacia delante, con un brillo que late mientras espera. Se mantiene mientras haga falta (validando). |
 
 ## Reacciones
@@ -393,34 +395,38 @@ formulario a la derecha (una columna en móvil, escena más baja).
 | --- | --- |
 | Carga | «Una corriente que cobra vida» (`emerge('stream')`, ≈ 2,9 s) sobre el panel blanco: un cuerpo de agua pequeño y translúcido entra por abajo a la izquierda (recortado por el panel), rápido y frenando; la punta concentra el volumen y la estela se afina; dos microgotas lo siguen con retraso. En el centro gira y dibuja una «S»; la cola sigue por inercia, se pliega sobre la punta, aparece el puente y todo se funde. La masa se estira hacia arriba, se ensancha y es KAI: ojos cerrados, entreabiertos, abiertos. Una gotita llega tarde por la izquierda, deforma el borde y KAI la mira; dos oscilaciones que decrecen, parpadeo y, al terminar, **saluda** (manita que se agita y guiño). El formulario se puede usar desde el primer instante. |
 | En reposo | Vive: cada 6,5–10,5 s, si nadie está escribiendo ni pasando por el botón, un gesto natural al azar (mirar el formulario, curiosear, rebotar, asentir, tener una idea, sonreír, reírse), sin repetir el anterior. Mientras se escribe el correo mira el campo; con la contraseña cierra los ojos (no mira). |
-| Cursor, foco de teclado o dedo sobre «Ingresar» | La «galaxia» aparece con un fundido sobre el blanco. KAI mira el botón, retrocede un instante y se inclina hacia donde va (estado `travel`): **no se estira**, solo se deforma un poco por la velocidad. De su espalda sale una **estela blanca plana** del ancho del cuerpo, alineada con el movimiento y con un borde blanco que lo rodea, como en la referencia; unas gotitas mínimas se desprenden junto a él. El entorno pasa al revés y rápido: degradados lentos al fondo, trazos anchos y destellos en el plano medio, reflejos alargados delante (sin gotas). Ciclo continuo. Un brillo cruza el botón. Al salir frena, recoge la estela y vuelve el blanco; si se vuelve a entrar a medias, sigue desde la pose actual. |
+| Cursor, foco de teclado o dedo sobre «Ingresar» | La «galaxia» aparece con un fundido sobre el blanco: degradado azul noche → violeta, trazos azules anchos que pasan muy rápido, destellos de cuatro puntas y reflejos finos (sin gotas), en sentido contrario al viaje. KAI mira el botón, retrocede un instante, se coloca algo a la derecha y viaja **de izquierda a derecha y hacia abajo (≈ 32°, medido en la referencia)**, casi de frente (estado `travel`): no se estira, solo se deforma un poco por la velocidad. De su espalda sale una **estela blanca plana** con un borde blanco que lo rodea; como en la referencia, es una cuña recta que se estrecha hacia atrás (llega al borde del panel con la mitad de su anchura), y unas gotitas mínimas se desprenden junto a él. Ciclo continuo. Un brillo cruza el botón. Al salir frena, recoge la estela y vuelve el blanco; si se vuelve a entrar a medias, sigue desde la pose actual. |
 | Envío (clic, Enter o toque) | Se comprime y se impulsa (`rush`); el entorno acelera, un pulso de luz recorre la estela y el botón pasa a «Validando…». Sin hover previo la anticipación es más corta (sale del reposo). Si se envía durante la aparición, esta se cancela desde la pose actual. Se sostiene lo que dure la validación. |
 | Error | Frena, recoge la estela, vuelve el blanco y pasa a `error` mirando el botón; aparece el aviso y los campos se marcan (`aria-invalid`). Al escribir deja el error. |
-| Acceso correcto | El contenedor (galaxia incluida) se aparta. KAI sale del panel en una **curva amplia**: hacia la derecha, sube por el lado y entra al navbar desde abajo, siempre orientado según su recorrido y con la estela blanca siguiéndolo. **Choca** contra el navbar: el cuerpo se aplasta contra el techo y su líquido (con el color de KAI) corre hacia los dos lados con frentes que se abomban y un rebote elástico; un destello y una onda marcan el golpe, saltan unas pocas gotitas, cuelgan dos gotas que se recogen y los ojos sonríen un instante. Después el color de KAI se vuelve el vidrio del navbar, la forma termina en la de la barra real, un brillo la recorre y la barra real toma el relevo: primero sus controles y, por último, el contenido. |
+| Acceso correcto | Como al final de la referencia: KAI acelera en su dirección y **sale disparado del recuadro** (el panel lo recorta), la cola de la estela pasa tras él y queda la galaxia un instante. Después el contenedor se aparta y la intranet se presenta: el **navbar se crea** desde arriba (baja, se enfoca desde un desenfoque y se abre desde el centro hasta su ancho), un brillo lo recorre y aparecen sus controles en cascada; luego se descubre el contenido y, por último, **KAI entra desde el borde derecho de la pantalla** hacia la izquierda hasta su sitio abajo a la derecha, frena con un pequeño rebote y saluda. |
 
 **Continuidad entre páginas.** Un acceso correcto se reconoce porque la
 respuesta ya no es una página `auth/*`. Un interceptor de Inertia
 (`interceptors.onVisitResponse`) retiene esa respuesta hasta que la capa de
 llegada cubre la pantalla con el mismo color de fondo (máximo 7 s); entonces
 Inertia monta el destino debajo y `AppHeader` espera oculto (`is-arriving`)
-hasta el aviso `kiub:navbar-ready` (o 6 s como mínimo de seguridad). La capa
-mide la `.kn-bar` real para terminar exactamente en su sitio. Mientras KAI
-sale, la barra de progreso de Inertia se oculta: el viaje es el indicador.
+hasta el aviso `kiub:navbar-ready` (o 6 s como mínimo de seguridad), que la
+capa da en cuanto el navbar existe. El KAI flotante de la intranet (montado
+por `AppHeader`) espera fuera de la pantalla hasta el aviso `kiub:kai-arrive`
+(u 8 s). Mientras KAI sale, la barra de progreso de Inertia se oculta: el
+viaje es el indicador.
 `interceptors` está marcado como interno en `@inertiajs/core` 3.9: si cambia,
 el acceso sigue funcionando y solo se pierde la transición.
 
 **Movimiento reducido**: aparición suave de ~1 s, sin estela, gestos
 espontáneos ni entorno en movimiento (la galaxia aparece quieta), poses
 discretas al pasar por el botón y al enviar, y salida breve: KAI se desvanece,
-la barra aparece y el contenido se descubre en ≈ 1,3 s.
+la barra y el contenido aparecen sin desplazamientos (≈ 1,4 s) y el KAI
+flotante aparece en su sitio sin viajar.
 
 **Afinar**: `STREAM` en `lib/kai/stream.ts` (duración, retraso de la estela,
-elasticidad, mirada final); `ARRIVAL` en `lib/kai/arrival.ts` (expansión del
-líquido, paso al vidrio, recogida de la estela, entrega y fundido del
-contenido); en `KaiLoginScene.vue`, `HEADING` (dirección del viaje), `SPEED`
-(velocidades del entorno), `MOOD_EVERY` y `MOODS` (gestos en reposo) y el lazo
-de salida en `depart()`; en `useTravelLayers.ts`, `DEPTH` (velocidad de cada
-plano).
+elasticidad, mirada final); `ARRIVAL` en `lib/kai/arrival.ts` (cuándo se
+descubre el contenido y cuándo entra KAI); en `KaiLoginScene.vue`, `HEADING`
+(dirección del viaje), `SPEED` (velocidades del entorno), `MOOD_EVERY` y
+`MOODS` (gestos en reposo) y la salida en `depart()`; en `useWhiteTrail.ts`,
+`EDGE_WIDTH` y `OUTLINE` (perspectiva y borde de la estela); en
+`useTravelLayers.ts`, `DEPTH` (velocidad de cada plano); en `AppHeader.vue`,
+`kn-create` (creación del navbar); en `KaiDock.vue`, `arrive()` (entrada).
 
 ## Juegos
 
@@ -473,9 +479,10 @@ plano).
 - **Estiramiento.** Responde a la rueda del ratón, al trackpad y al gesto
   táctil al final de la página. Arrastrar la barra de desplazamiento o pulsar
   `Fin` no lo activa.
-- **Integración.** El compañero flotante solo se monta en el laboratorio.
-  Para la intranet basta con añadir `<KaiDock>` una vez en el layout principal,
-  pasarle los avisos reales y navegar con Inertia en `navigate`.
+- **Integración.** `AppHeader` monta el KAI flotante de la intranet
+  (`companion`, activado por defecto; sus enlaces navegan con Inertia). Si una
+  página monta el suyo (el laboratorio), el de la intranet se aparta. Falta
+  pasarle los avisos reales.
 - **Chat.** Es una guía escrita, no entiende lenguaje libre: el buscador
   compara palabras. El contenido de `KIUB_GUIDE` (rutas, nombres de módulos y
   pasos) es de ejemplo y hay que revisarlo con cada área. «Muéstrame dónde»
@@ -489,9 +496,7 @@ plano).
 - **Ruta.** El enlace de las migas usa `'/dev/kai'` literal; puede sustituirse
   por el helper que genere Wayfinder para `dev.kai`.
 - **Inicio de sesión.** El interceptor de Inertia es una API interna (ver
-  arriba). Con tema oscuro, la barra de la llegada termina en vidrio claro y
-  se funde con la oscura en 0,3 s. Sobre el fondo claro de la página, la
-  estela blanca se separa con una sombra suave.
+  arriba).
   Los mensajes de error de Fortify salen del idioma de la aplicación (en el
   banco de pruebas, en inglés). La referencia de la pantalla se comparó a ojo
   con la imagen del encargo (no estaba disponible como archivo).

@@ -1,19 +1,17 @@
 /**
  * Estela blanca de KAI en el inicio de sesión, como la de la referencia:
- * una cinta plana del ancho del cuerpo que sale de su espalda en sentido
- * contrario al viaje, con un borde blanco que lo rodea y unas gotitas
- * mínimas que se desprenden junto a él.
+ * una cinta plana que sale de su espalda en sentido contrario al viaje,
+ * del ancho del cuerpo junto a él y más estrecha hacia atrás (perspectiva:
+ * KAI viaja un poco hacia la cámara). Un borde blanco lo rodea y unas
+ * gotitas mínimas se desprenden junto a él.
  *
- * - En viaje (`setAmount`) es recta, alineada con la dirección, y llega
- *   hasta el borde del panel; crece y se recoge con suavidad.
- * - En la salida (`follow(true)`) sigue el recorrido real de KAI.
- *
- * Dibuja en un `<canvas>` fijo a pantalla completa (coordenadas de la
- * ventana); dentro del panel se recorta con sus esquinas redondeadas.
+ * Es recta, alineada con la dirección del viaje, y llega hasta el borde del
+ * panel; crece y se recoge con suavidad. Dibuja en un `<canvas>` fijo a
+ * pantalla completa (coordenadas de la ventana), recortado con las esquinas
+ * redondeadas del panel.
  */
 
-import { drawRibbon, trimRibbon } from '@/lib/kai/ribbon';
-import type { RibbonPoint } from '@/lib/kai/ribbon';
+import { drawRibbon } from '@/lib/kai/ribbon';
 
 export type TrailHead = { x: number; y: number; r: number };
 export type TrailClip = { rect: DOMRect; radius: number };
@@ -29,19 +27,36 @@ type Droplet = {
     inside: boolean;
 };
 
-/** Largo máximo de la estela que sigue el recorrido (px). */
-const FOLLOW_LENGTH = 560;
+/**
+ * Perspectiva, como en la referencia: una cuña recta que llega al borde
+ * del panel con esta fracción de su anchura junto a KAI.
+ */
+const EDGE_WIDTH = 0.5;
+/** Borde blanco alrededor de KAI (radios). */
+const OUTLINE = 1.2;
+
+/** Media anchura a una distancia `d` de KAI (`edge`: distancia al borde). */
+function widthAt(w: number, d: number, edge: number): number {
+    return w * Math.max(0.15, 1 - ((1 - EDGE_WIDTH) * d) / edge);
+}
+
+/** Distancia desde `(x, y)` hasta el borde del rectángulo en la dirección `(ux, uy)`. */
+function toEdge(rect: DOMRect, x: number, y: number, ux: number, uy: number) {
+    const tx = ux < 0 ? (rect.left - x) / ux : (rect.right - x) / ux;
+    const ty = uy < 0 ? (rect.top - y) / uy : (rect.bottom - y) / uy;
+
+    return Math.max(1, Math.min(Math.abs(tx), Math.abs(ty)));
+}
 
 export function createWhiteTrail(canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
     let dpr = 1;
     let target = 0;
     let amount = 0;
+    let retract = 4.2;
     let rush = 0;
     let time = 0;
     let spawn = 0;
-    let following = false;
-    let path: RibbonPoint[] = [];
     let drawn = false;
     const droplets: Droplet[] = [];
 
@@ -50,20 +65,6 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
         canvas.width = Math.round(window.innerWidth * dpr);
         canvas.height = Math.round(window.innerHeight * dpr);
         drawn = true;
-    }
-
-    /** La estela recta actual, de la cabeza (KAI) hacia atrás. */
-    function straight(head: TrailHead, heading: number, reach: number) {
-        const ux = Math.cos(heading + Math.PI);
-        const uy = Math.sin(heading + Math.PI);
-        const grow = 1 - Math.pow(1 - Math.min(1, amount), 2.2);
-        const len = reach * grow;
-        const w = head.r * (0.97 + 0.05 * rush);
-
-        return [
-            { x: head.x, y: head.y, w },
-            { x: head.x + ux * len, y: head.y + uy * len, w: w * 1.1 },
-        ];
     }
 
     function frame(
@@ -79,16 +80,14 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
 
         time += dt;
         // Crece rápido y se recoge un poco más despacio.
-        const rate = target > amount ? 6.5 : 4.2;
+        const rate = target > amount ? 6.5 : retract;
         amount += (target - amount) * Math.min(1, dt * rate);
 
         if (Math.abs(target - amount) < 0.002) {
             amount = target;
         }
 
-        const visible = following || amount > 0.004 || droplets.length > 0;
-
-        if (!visible) {
+        if (amount <= 0.004 && droplets.length === 0) {
             if (drawn) {
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -103,102 +102,77 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
         ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         ctx.save();
 
-        if (clip && !following) {
+        if (clip) {
             const { rect, radius } = clip;
             ctx.beginPath();
             ctx.roundRect(rect.left, rect.top, rect.width, rect.height, radius);
             ctx.clip();
         }
 
-        let points: RibbonPoint[] = [];
+        const ux = Math.cos(heading + Math.PI);
+        const uy = Math.sin(heading + Math.PI);
 
-        if (head) {
-            if (following) {
-                const last = path[0];
-
-                if (
-                    !last ||
-                    Math.hypot(head.x - last.x, head.y - last.y) > 1.5
-                ) {
-                    path.unshift({ x: head.x, y: head.y, w: head.r * 0.97 });
-                }
-
-                path = trimRibbon(path, FOLLOW_LENGTH);
-                points = path;
-            } else if (amount > 0.004) {
-                const reach = clip
-                    ? Math.hypot(clip.rect.width, clip.rect.height) * 1.1
-                    : 900;
-                points = straight(head, heading, reach);
-            }
-        }
-
-        if (points.length > 1 && head) {
-            // Fuera del panel, sobre el fondo claro, una sombra mínima la
-            // separa del fondo.
-            if (following) {
-                ctx.shadowColor = 'rgba(21, 25, 36, 0.10)';
-                ctx.shadowBlur = 18;
-                ctx.shadowOffsetY = 6;
-            }
+        if (head && amount > 0.004) {
+            const reach = clip
+                ? Math.hypot(clip.rect.width, clip.rect.height) * 1.05
+                : 900;
+            const grow = 1 - Math.pow(1 - Math.min(1, amount), 2.2);
+            const len = reach * grow;
+            // Junto a KAI, tan ancha como su borde blanco: se unen sin escalón.
+            const w = head.r * (OUTLINE + 0.05 * rush);
+            const edge = clip ? toEdge(clip.rect, head.x, head.y, ux, uy) : len;
+            const points = [0, 1].map((k) => ({
+                x: head.x + ux * len * k,
+                y: head.y + uy * len * k,
+                w: widthAt(w, len * k, edge),
+            }));
 
             drawRibbon(ctx, points);
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-            ctx.shadowOffsetY = 0;
             // Borde blanco alrededor de KAI: la estela nace de su silueta.
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(
                 head.x,
                 head.y,
-                head.r * 1.13 * (following ? 1 : Math.min(1, amount * 1.6)),
+                head.r * OUTLINE * Math.min(1, amount * 1.6),
                 0,
                 Math.PI * 2,
             );
             ctx.fill();
 
             // Impulso: un pulso de luz recorre la estela hacia atrás.
-            if (rush > 0.01 && !following) {
-                const [a, b] = points;
+            if (rush > 0.01) {
                 const p = (time * 1.3) % 1;
                 const span = 70;
-                const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-                const ux = (b.x - a.x) / len;
-                const uy = (b.y - a.y) / len;
                 const d = head.r * 1.2 + p * (len - head.r * 1.2);
                 const g = ctx.createLinearGradient(
-                    a.x + ux * (d - span),
-                    a.y + uy * (d - span),
-                    a.x + ux * (d + span),
-                    a.y + uy * (d + span),
+                    head.x + ux * (d - span),
+                    head.y + uy * (d - span),
+                    head.x + ux * (d + span),
+                    head.y + uy * (d + span),
                 );
                 g.addColorStop(0, 'rgba(120,170,255,0)');
                 g.addColorStop(0.5, `rgba(120,170,255,${0.16 * rush})`);
                 g.addColorStop(1, 'rgba(120,170,255,0)');
                 ctx.strokeStyle = g;
                 ctx.lineCap = 'butt';
-                ctx.lineWidth = a.w * 2;
+                ctx.lineWidth = widthAt(w, d, edge) * 2;
                 ctx.beginPath();
-                ctx.moveTo(a.x + ux * (d - span), a.y + uy * (d - span));
-                ctx.lineTo(a.x + ux * (d + span), a.y + uy * (d + span));
+                ctx.moveTo(head.x + ux * (d - span), head.y + uy * (d - span));
+                ctx.lineTo(head.x + ux * (d + span), head.y + uy * (d + span));
                 ctx.stroke();
             }
 
             // Gotitas que se desprenden junto a la espalda de KAI.
             spawn -= dt;
 
-            if (spawn <= 0 && (following || amount > 0.5)) {
+            if (spawn <= 0 && amount > 0.5) {
                 spawn = 0.09 + Math.random() * 0.08;
-                const [a, b] = points;
-                const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-                const ux = (b.x - a.x) / len;
-                const uy = (b.y - a.y) / len;
                 const inside = Math.random() < 0.6;
                 const side = (Math.random() - 0.5) * 2;
                 const off = inside
-                    ? side * a.w * 0.7
-                    : Math.sign(side) * (a.w + 6 + Math.random() * 8);
+                    ? side * w * 0.7
+                    : Math.sign(side) * (w + 6 + Math.random() * 8);
                 const back = head.r * (1.05 + Math.random() * 0.5);
                 const speed =
                     (260 + Math.random() * 320) * Math.max(0.6, envSpeed);
@@ -247,35 +221,21 @@ export function createWhiteTrail(canvas: HTMLCanvasElement) {
     return {
         resize,
         frame,
-        /** Viaje en línea recta: 0 recogida, 1 viaje. */
-        setAmount(value: number) {
+        /**
+         * 0 recogida, 1 viaje. `rate` (1/s) acelera la recogida: al salir
+         * del panel la cola pasa rápido, como en la referencia.
+         */
+        setAmount(value: number, rate = 4.2) {
             target = value;
+            retract = rate;
         },
         /** 0-1: pulso de luz y algo más de anchura mientras se valida. */
         setRush(value: number) {
             rush = value;
         },
-        /**
-         * Seguir el recorrido real (salida). Parte de la estela recta
-         * actual para que no haya salto.
-         */
-        follow(on: boolean, head?: TrailHead, heading = 0, reach = 600) {
-            following = on;
-
-            if (on && head) {
-                const [a, b] = straight(head, heading, reach);
-                path = [a, b];
-            }
-        },
-        /** La estela en este momento (cabeza primero), para entregarla. */
-        snapshot(): RibbonPoint[] {
-            return path.map((p) => ({ ...p }));
-        },
         clear() {
-            following = false;
             target = 0;
             amount = 0;
-            path = [];
             droplets.length = 0;
         },
     };

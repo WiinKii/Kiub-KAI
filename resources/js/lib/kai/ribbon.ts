@@ -1,7 +1,7 @@
 /**
- * Estela blanca de KAI: una cinta plana (2D), como la de la referencia, que
- * sigue el recorrido. La usan la escena del inicio de sesión (viaje y
- * salida) y la capa de llegada (la cinta se recoge al chocar con el navbar).
+ * Estela blanca de KAI: una cinta plana (2D), como la de la referencia,
+ * con anchura variable a lo largo del recorrido (la usa el inicio de
+ * sesión).
  */
 
 /** Punto de la cinta en píxeles de pantalla; `w` es la media anchura. */
@@ -68,53 +68,4 @@ export function drawRibbon(
     }
 
     ctx.fill('nonzero');
-}
-
-/** Longitud total del recorrido de la cinta (px). */
-export function ribbonLength(points: RibbonPoint[]): number {
-    let length = 0;
-
-    for (let i = 1; i < points.length; i++) {
-        length += Math.hypot(
-            points[i].x - points[i - 1].x,
-            points[i].y - points[i - 1].y,
-        );
-    }
-
-    return length;
-}
-
-/**
- * Recorta la cinta desde la cola dejando `keep` px medidos desde la cabeza
- * (el primer punto es la cabeza, junto a KAI).
- */
-export function trimRibbon(points: RibbonPoint[], keep: number): RibbonPoint[] {
-    if (keep <= 0 || points.length < 2) {
-        return points.slice(0, 1);
-    }
-
-    const out: RibbonPoint[] = [points[0]];
-    let left = keep;
-
-    for (let i = 1; i < points.length; i++) {
-        const a = points[i - 1];
-        const b = points[i];
-        const d = Math.hypot(b.x - a.x, b.y - a.y);
-
-        if (d >= left) {
-            const u = d > 0 ? left / d : 0;
-            out.push({
-                x: a.x + (b.x - a.x) * u,
-                y: a.y + (b.y - a.y) * u,
-                w: a.w + (b.w - a.w) * u,
-            });
-
-            return out;
-        }
-
-        out.push(b);
-        left -= d;
-    }
-
-    return out;
 }

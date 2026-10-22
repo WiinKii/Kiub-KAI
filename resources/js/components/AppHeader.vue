@@ -8,7 +8,7 @@ const lastPill = { x: 0, w: 0, ready: false };
 </script>
 
 <script setup lang="ts">
-import { Link, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     Bell,
     Calendar,
@@ -30,6 +30,8 @@ import {
     watch,
 } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
+import { pageDocks } from '@/components/kai/dockOwners';
+import KaiDock from '@/components/kai/KaiDock.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -71,6 +73,8 @@ type Props = {
     notificationCount?: number;
     /** Barras animadas junto al logo. */
     animatedMark?: boolean;
+    /** KAI flotante abajo a la derecha de la intranet. */
+    companion?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -79,6 +83,7 @@ const props = withDefaults(defineProps<Props>(), {
     userSubtitle: '',
     notificationCount: 0,
     animatedMark: true,
+    companion: true,
 });
 
 const emit = defineEmits<{
@@ -297,10 +302,13 @@ function onSearchBlur() {
 }
 
 /* ── Llegada desde el inicio de sesión ─────────────────────────────── */
-// Las gotas de KAI forman la cápsula sobre la página: la barra real espera
-// oculta y aparece cuando la cápsula está completa; después, los controles.
+// La barra espera oculta bajo el telón de la llegada y, al aviso, se crea:
+// baja desde arriba y se abre desde el centro; después, los controles.
 const arriving = ref(arrivalPending());
+// Se queda puesta: quitarla reiniciaría la animación de entrada normal.
 const arrived = ref(false);
+/** Por encima del telón mientras dura la llegada. */
+const landing = ref(false);
 let offReady: (() => void) | undefined;
 let arrivalTimer: number | undefined;
 
@@ -309,7 +317,8 @@ function revealBar() {
     window.clearTimeout(arrivalTimer);
     arriving.value = false;
     arrived.value = true;
-    arrivalTimer = window.setTimeout(() => (arrived.value = false), 1600);
+    landing.value = true;
+    arrivalTimer = window.setTimeout(() => (landing.value = false), 1800);
     nextTick(() => measurePill());
 }
 
@@ -334,6 +343,13 @@ onMounted(() => {
     }
 });
 
+/* ── KAI flotante ───────────────────────────────────────────────────── */
+// Los enlaces de su chat navegan con Inertia.
+function onKaiNavigate(href: string, event: MouseEvent) {
+    event.preventDefault();
+    router.visit(href);
+}
+
 onBeforeUnmount(() => {
     offReady?.();
     window.clearTimeout(arrivalTimer);
@@ -347,7 +363,11 @@ onBeforeUnmount(() => {
 <template>
     <div
         class="kn-root"
-        :class="{ 'is-arriving': arriving, 'is-arrived': arrived }"
+        :class="{
+            'is-arriving': arriving,
+            'is-arrived': arrived,
+            'is-landing': landing,
+        }"
     >
         <header class="kn-header">
             <div class="kn-shell">
@@ -362,6 +382,7 @@ onBeforeUnmount(() => {
                     @pointermove="onPointerMove"
                 >
                     <span class="kn-sheen" aria-hidden="true" />
+                    <span class="kn-born" aria-hidden="true" />
                     <span class="kn-spot" aria-hidden="true" />
 
                     <!-- Menú móvil -->
@@ -826,6 +847,14 @@ onBeforeUnmount(() => {
         <div v-if="props.breadcrumbs.length > 1" class="kn-crumbs">
             <Breadcrumbs :breadcrumbs="breadcrumbs" />
         </div>
+
+        <Teleport to="body">
+            <KaiDock
+                v-if="companion && pageDocks === 0"
+                app
+                @navigate="onKaiNavigate"
+            />
+        </Teleport>
     </div>
 </template>
 
@@ -1000,10 +1029,10 @@ onBeforeUnmount(() => {
     animation-delay: 0.24s;
 }
 
-/* ── Llegada: la barra espera a la cápsula de KAI ─────────────────────── */
+/* ── Llegada: la barra se crea al aviso de la llegada ──────────────── */
 .kn-root.is-arriving .kn-header,
-.kn-root.is-arrived .kn-header {
-    /* Sobre el telón de la llegada, bajo la capa de las gotas. */
+.kn-root.is-landing .kn-header {
+    /* Sobre el telón de la llegada. */
     z-index: 70;
 }
 
@@ -1019,24 +1048,61 @@ onBeforeUnmount(() => {
 }
 
 .kn-root.is-arrived .kn-bar {
-    animation: kn-arrive 0.32s ease-out backwards;
+    animation: kn-create 1s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* Un brillo recorre la barra recién creada. */
+.kn-born {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.kn-born::before {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        100deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.85) 50%,
+        transparent 70%
+    );
+    opacity: 0;
+    transform: translateX(-100%);
+    content: '';
+}
+
+.kn-root.is-arrived .kn-born::before {
+    animation: kn-born-sheen 0.95s cubic-bezier(0.45, 0, 0.25, 1) 0.42s;
+}
+
+:root.dark .kn-born::before {
+    background: linear-gradient(
+        100deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.12) 50%,
+        transparent 70%
+    );
 }
 
 .kn-root.is-arrived .kn-enter,
 .kn-root.is-arrived .kn-burger {
-    animation-name: kn-item-arrive;
+    animation: kn-item-arrive 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
-.kn-root.is-arrived .kn-logo.kn-enter {
-    animation-delay: 0.12s;
+.kn-root.is-arrived .kn-logo.kn-enter,
+.kn-root.is-arrived .kn-burger {
+    animation-delay: 0.36s;
 }
 
 .kn-root.is-arrived .kn-links.kn-enter {
-    animation-delay: 0.2s;
+    animation-delay: 0.46s;
 }
 
 .kn-root.is-arrived .kn-right.kn-enter {
-    animation-delay: 0.28s;
+    animation-delay: 0.56s;
 }
 
 /* ── Logo ───────────────────────────────────────────────────────────── */
@@ -1978,16 +2044,50 @@ onBeforeUnmount(() => {
     }
 }
 
-@keyframes kn-arrive {
-    from {
+/* Creación: baja desde arriba, nítida desde un desenfoque, y se abre
+   desde el centro hasta su ancho. */
+@keyframes kn-create {
+    0% {
         opacity: 0;
+        filter: blur(10px);
+        transform: translateY(-30px) scale(0.97);
+        clip-path: inset(0 44% 0 44% round 22px);
+    }
+
+    40% {
+        opacity: 1;
+        filter: blur(0);
+    }
+
+    100% {
+        opacity: 1;
+        filter: blur(0);
+        transform: none;
+        clip-path: inset(-60px round 82px);
+    }
+}
+
+@keyframes kn-born-sheen {
+    0% {
+        opacity: 0;
+        transform: translateX(-100%);
+    }
+
+    20% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        transform: translateX(100%);
     }
 }
 
 @keyframes kn-item-arrive {
     from {
         opacity: 0;
-        transform: translateY(4px) scale(0.96);
+        filter: blur(4px);
+        transform: translateY(6px) scale(0.97);
     }
 }
 

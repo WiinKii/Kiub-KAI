@@ -13,6 +13,9 @@
  * Al pulsarlo abre el chat guiado de la sección actual. Los avisos se
  * muestran en un globito sobre su cuerpo y en el chat; KAI señala con una
  * manita los elementos de la página de los que habla.
+ *
+ * Tras iniciar sesión llega a su sitio entrando desde el borde derecho de
+ * la pantalla (aviso de `lib/kai/arrival`) y saluda.
  */
 import {
     useEventListener,
@@ -28,6 +31,7 @@ import {
     useId,
     watch,
 } from 'vue';
+import { kaiArrivalPending, onKaiArrive } from '@/lib/kai/arrival';
 import { KIUB_GUIDE, sectionFromUrl } from '@/lib/kai/guide';
 import type { KaiGuide, KaiNotice } from '@/lib/kai/guide';
 import type { KaiColors } from '@/lib/kai/palette';
@@ -39,6 +43,7 @@ import type {
 } from '@/lib/kai/types';
 import KaiCharacter from './KaiCharacter.vue';
 import KaiChat from './KaiChat.vue';
+import { pageDocks } from './dockOwners';
 import { useKaiOverscroll } from './useKaiOverscroll';
 
 type Props = {
@@ -63,6 +68,11 @@ type Props = {
     section?: string;
     /** Avisos sin leer: globito sobre KAI y primer mensaje del chat. */
     notices?: KaiNotice[];
+    /**
+     * Lo monta la intranet (layout), no una página. Si una página monta
+     * el suyo (p. ej. el laboratorio), este se aparta.
+     */
+    app?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -79,6 +89,7 @@ const props = withDefaults(defineProps<Props>(), {
     guide: () => KIUB_GUIDE,
     section: '',
     notices: () => [],
+    app: false,
 });
 
 const emit = defineEmits<{
@@ -143,7 +154,20 @@ const currentSection = ref(props.section);
 
 // Los estados de presencia solo «tapan» el reposo: un estado real (trabajando,
 // error…) siempre se ve.
+/* ── Llegada tras iniciar sesión: entra desde la derecha ────────────── */
+const away = ref(kaiArrivalPending());
+const entering = ref(false);
+const offset = ref(0);
+let offArrive: (() => void) | undefined;
+let arriveTimer = 0;
+let arriveFrame = 0;
+
 const shown = computed<KaiState>(() => {
+    // Mientras entra, viaja hacia su sitio.
+    if (entering.value) {
+        return 'travel';
+    }
+
     if (state.value !== 'idle') {
         return state.value;
     }
@@ -355,19 +379,17 @@ useEventListener(
     { passive: true },
 );
 
-/* ── Saludo: una vez por sesión ──────────────────────────────────────── */
+/* ── Saludo: una vez por sesión (y siempre al llegar tras el acceso) ─── */
 const GREETED_KEY = 'kiub.kai.greeted';
 let greetTimer = 0;
 
-onMounted(() => {
-    lastScroll = window.scrollY;
-
+function greet(delay: number, always = false) {
     if (!props.greet) {
         return;
     }
 
     try {
-        if (window.sessionStorage.getItem(GREETED_KEY)) {
+        if (!always && window.sessionStorage.getItem(GREETED_KEY)) {
             return;
         }
 
@@ -380,10 +402,84 @@ onMounted(() => {
         if (state.value === 'idle') {
             void kai.value?.react('welcome');
         }
-    }, 900);
+    }, delay);
+}
+
+/**
+ * Entra desde el borde derecho hasta su sitio: viaja hacia la izquierda,
+ * frena con un pequeño rebote (la masa sigue un poco por inercia) y saluda.
+ */
+function arrive() {
+    offArrive?.();
+    window.clearTimeout(arriveTimer);
+
+    if (!away.value) {
+        return;
+    }
+
+    away.value = false;
+
+    if (reduced.value) {
+        greet(300, true);
+
+        return;
+    }
+
+    const from = 28 + px.value + 80;
+    const start = performance.now();
+    const duration = 950;
+    offset.value = from;
+    entering.value = true;
+    kai.value?.setHeading(Math.PI);
+
+    const step = (now: number) => {
+        const u = Math.min(1, (now - start) / duration);
+        // Sale rápido y se pasa un poco antes de asentarse.
+        const back = u - 1;
+        const e = 1 + 2.2 * back * back * back + 1.2 * back * back;
+        offset.value = from * (1 - e);
+
+        if (u < 1) {
+            arriveFrame = window.requestAnimationFrame(step);
+
+            return;
+        }
+
+        offset.value = 0;
+        entering.value = false;
+        kai.value?.nudge(-1.1, 0);
+        greet(380, true);
+    };
+
+    arriveFrame = window.requestAnimationFrame(step);
+}
+
+onMounted(() => {
+    lastScroll = window.scrollY;
+
+    if (!props.app) {
+        pageDocks.value++;
+    }
+
+    if (away.value) {
+        offArrive = onKaiArrive(arrive);
+        // Si la llegada no avisa (pestaña oculta, error), aparece igual.
+        arriveTimer = window.setTimeout(arrive, 8000);
+
+        return;
+    }
+
+    greet(900);
 });
 
 onBeforeUnmount(() => {
+    if (!props.app) {
+        pageDocks.value--;
+    }
+
+    offArrive?.();
+    window.clearTimeout(arriveTimer);
+    window.cancelAnimationFrame(arriveFrame);
     window.clearTimeout(lookTimer);
     window.clearTimeout(greetTimer);
     window.cancelAnimationFrame(spotFrame);
@@ -394,7 +490,13 @@ defineExpose({ kai, asleep, chatOpen, openChat, closeChat });
 </script>
 
 <template>
-    <div class="kai-dock" :data-size="size">
+    <div
+        class="kai-dock"
+        :class="{ 'is-away': away }"
+        :data-size="size"
+        :data-arriving="entering || undefined"
+        :style="offset ? { transform: `translateX(${offset}px)` } : undefined"
+    >
         <div
             v-if="spot"
             class="kai-dock-spot"
@@ -493,6 +595,15 @@ defineExpose({ kai, asleep, chatOpen, openChat, closeChat });
     flex-direction: column;
     align-items: center;
     gap: 6px;
+    pointer-events: none;
+}
+
+.kai-dock.is-away {
+    /* Opacidad, no visibilidad: el SVG fija `visibility` en sus gotas. */
+    opacity: 0;
+}
+
+.kai-dock.is-away * {
     pointer-events: none;
 }
 

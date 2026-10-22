@@ -1,15 +1,18 @@
 /**
- * Entorno de viaje del inicio de sesión, dibujado en un `<canvas>`.
+ * Entorno de viaje del inicio de sesión («galaxia»), dibujado en un
+ * `<canvas>` sobre el degradado azul noche → violeta del panel, como en la
+ * referencia.
  *
- * Tres profundidades que se desplazan en sentido contrario a KAI, cada una
- * a su velocidad: degradados amplios y lentos al fondo, trazos anchos y
- * destellos en el plano medio, y reflejos alargados y rápidos delante. Todo se
- * repite sobre un toro mayor que el panel, así el ciclo es continuo y nunca
- * se ve un reinicio. En reposo deriva muy despacio.
+ * Se desplaza en sentido contrario a KAI, en planos de distinta velocidad:
+ * volúmenes de luz lentos al fondo, destellos de cuatro puntas, trazos
+ * azules anchos que pasan muy rápido y reflejos finos aún más rápidos. La
+ * velocidad del fondo es la que da la sensación de que KAI va rápido. Todo
+ * se repite sobre un toro mayor que el panel: el ciclo es continuo y nunca
+ * se ve un reinicio.
  */
 
 export type TravelLayers = {
-    /** Velocidad objetivo: ~0 reposo, 1 viaje, 2,4 impulso, 3+ salida. */
+    /** Velocidad objetivo: ~0 reposo, 1 viaje, 2+ impulso. */
     setSpeed: (value: number) => void;
     /** Dirección del viaje (radianes; el entorno va al revés). */
     setHeading: (angle: number) => void;
@@ -19,17 +22,10 @@ export type TravelLayers = {
     readonly speed: number;
 };
 
-type Far = { x: number; y: number; r: number; color: string; alpha: number };
+type Glow = { x: number; y: number; r: number; color: string; alpha: number };
 type Stroke = { x: number; y: number; len: number; w: number; alpha: number };
-type Sparkle = { x: number; y: number; r: number; alpha: number };
-type Streak = {
-    x: number;
-    y: number;
-    len: number;
-    w: number;
-    alpha: number;
-    tw: number;
-};
+type Sparkle = { x: number; y: number; r: number; phase: number };
+type Streak = { x: number; y: number; len: number; alpha: number };
 
 function mulberry32(seed: number): () => number {
     let a = seed >>> 0;
@@ -44,10 +40,10 @@ function mulberry32(seed: number): () => number {
     };
 }
 
-/** Velocidad del plano en px/s a velocidad 1. */
-const DEPTH = { far: 40, mid: 300, near: 900 };
+/** Velocidad de cada plano en px/s a velocidad 1. */
+const DEPTH = { glow: 50, sparkle: 380, stroke: 1250, streak: 1800 };
 /** Margen del toro: los elementos salen del todo antes de reaparecer. */
-const WRAP = 160;
+const WRAP = 360;
 
 export function createTravelLayers(
     canvas: HTMLCanvasElement,
@@ -60,45 +56,47 @@ export function createTravelLayers(
     let dpr = 1;
     let speed = 0.04;
     let target = 0.04;
-    let heading = -0.72;
+    let heading = 0.55;
     let time = 0;
-    const offset = { x: 0, y: 0 };
+    let travel = 0;
 
-    const far: Far[] = [
-        { x: 0.18, y: 0.22, r: 0.55, color: '92,157,255', alpha: 0.34 },
-        { x: 0.82, y: 0.3, r: 0.48, color: '139,123,255', alpha: 0.3 },
-        { x: 0.32, y: 0.86, r: 0.6, color: '169,193,211', alpha: 0.16 },
-        { x: 0.9, y: 0.88, r: 0.42, color: '74,120,255', alpha: 0.26 },
-        { x: 0.55, y: 0.55, r: 0.36, color: '120,170,255', alpha: 0.14 },
+    const glows: Glow[] = [
+        { x: 0.15, y: 0.1, r: 0.6, color: '40,90,220', alpha: 0.28 },
+        { x: 0.85, y: 0.25, r: 0.5, color: '90,70,220', alpha: 0.2 },
+        { x: 0.35, y: 0.9, r: 0.7, color: '120,50,200', alpha: 0.2 },
     ];
-    const strokes: Stroke[] = Array.from({ length: 14 }, () => ({
+    // Trazos azules anchos (los que pasan rápido en la referencia).
+    const strokes: Stroke[] = Array.from({ length: 6 }, () => ({
         x: rand(),
         y: rand(),
-        len: 60 + rand() * 160,
-        w: 10 + rand() * 16,
-        alpha: 0.1 + rand() * 0.2,
+        len: 150 + rand() * 210,
+        w: 16 + rand() * 14,
+        alpha: 0.55 + rand() * 0.3,
     }));
-    const sparkles: Sparkle[] = Array.from({ length: 10 }, () => ({
+    const sparkles: Sparkle[] = Array.from({ length: 11 }, () => ({
         x: rand(),
         y: rand(),
-        r: 3 + rand() * 4,
-        alpha: rand() * Math.PI * 2,
+        r: 3 + rand() * 4.5,
+        phase: rand() * Math.PI * 2,
     }));
-    const streaks: Streak[] = Array.from({ length: 26 }, () => ({
+    const streaks: Streak[] = Array.from({ length: 12 }, () => ({
         x: rand(),
         y: rand(),
         len: 0.5 + rand() * 0.9,
-        w: 2 + rand() * 2.4,
-        alpha: 0.25 + rand() * 0.5,
-        tw: rand() * Math.PI * 2,
+        alpha: 0.18 + rand() * 0.3,
     }));
 
-    /** Posición envuelta de un elemento (`x`, `y` en 0-1) en el plano `depth`. */
-    function place(x: number, y: number, depth: number) {
+    /** Desplazamiento acumulado de cada plano (px). */
+    const offset = { glow: 0, sparkle: 0, stroke: 0, streak: 0 };
+
+    /** Posición envuelta de un elemento (`x`, `y` en 0-1) en un plano. */
+    function place(x: number, y: number, shift: number) {
         const spanX = width + WRAP * 2;
         const spanY = height + WRAP * 2;
-        let px = (x * spanX + offset.x * depth) % spanX;
-        let py = (y * spanY + offset.y * depth) % spanY;
+        const dx = -Math.cos(heading) * shift;
+        const dy = -Math.sin(heading) * shift;
+        let px = (x * spanX + dx) % spanX;
+        let py = (y * spanY + dy) % spanY;
 
         if (px < 0) {
             px += spanX;
@@ -119,55 +117,34 @@ export function createTravelLayers(
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, width, height);
 
-        const dx = -Math.cos(heading);
-        const dy = -Math.sin(heading);
-        const angle = Math.atan2(dy, dx);
+        // Dirección de las líneas: la del viaje.
+        const ux = Math.cos(heading);
+        const uy = Math.sin(heading);
         const s = Math.min(speed, 4);
 
-        // Fondo: volúmenes de luz amplios que apenas se mueven.
-        for (const b of far) {
-            const p = place(b.x, b.y, DEPTH.far / DEPTH.near);
-            const r = b.r * Math.max(width, height);
-            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-            g.addColorStop(0, `rgba(${b.color},${b.alpha})`);
-            g.addColorStop(1, `rgba(${b.color},0)`);
-            ctx.fillStyle = g;
+        for (const g of glows) {
+            const p = place(g.x, g.y, offset.glow);
+            const r = g.r * Math.max(width, height);
+            const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+            grad.addColorStop(0, `rgba(${g.color},${g.alpha})`);
+            grad.addColorStop(1, `rgba(${g.color},0)`);
+            ctx.fillStyle = grad;
             ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
         }
 
-        // Plano medio: trazos suaves orientados con el viaje y gotas.
-        ctx.lineCap = 'round';
-
-        // En reposo casi no se ven: el viaje los hace aparecer.
-        const travel = Math.min(1, s);
-
-        for (const st of strokes) {
-            const p = place(st.x, st.y, DEPTH.mid / DEPTH.near);
-            const len = st.len * (1 + s * 0.55);
-            ctx.strokeStyle = `rgba(86,128,255,${st.alpha * (0.18 + 0.82 * travel)})`;
-            ctx.lineWidth = st.w;
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(
-                p.x - Math.cos(angle) * len,
-                p.y - Math.sin(angle) * len,
-            );
-            ctx.stroke();
-        }
-
-        // Destellos de cuatro puntas que titilan (plano medio-cercano).
+        // Destellos de cuatro puntas que titilan.
         ctx.fillStyle = '#ffffff';
 
         for (const sp of sparkles) {
-            const p = place(sp.x, sp.y, 0.95);
-            const tw = 0.5 + 0.5 * Math.sin(time * 3.1 + sp.alpha);
-            const a = (0.25 + 0.6 * travel) * tw;
+            const p = place(sp.x, sp.y, offset.sparkle);
+            const tw = 0.5 + 0.5 * Math.sin(time * 3.4 + sp.phase);
+            const a = (0.35 + 0.55 * travel) * tw;
 
             if (a < 0.03) {
                 continue;
             }
 
-            const r = sp.r * (0.7 + 0.3 * tw);
+            const r = sp.r * (0.65 + 0.35 * tw);
             ctx.globalAlpha = a;
             ctx.beginPath();
             ctx.moveTo(p.x, p.y - r);
@@ -179,26 +156,38 @@ export function createTravelLayers(
         }
 
         ctx.globalAlpha = 1;
+        ctx.lineCap = 'round';
 
-        // Delante: reflejos alargados y rápidos, solo cuando hay viaje.
-        const visible = Math.min(1, Math.max(0, (s - 0.12) / 0.6));
-
-        if (visible > 0.01) {
-            for (const st of streaks) {
-                const p = place(st.x, st.y, 1);
-                const len = (14 + 110 * Math.min(s, 3)) * st.len;
-                const twinkle = 0.75 + 0.25 * Math.sin(time * 7 + st.tw);
-                const a = st.alpha * visible * twinkle;
-                const tx = p.x - Math.cos(angle) * len;
-                const ty = p.y - Math.sin(angle) * len;
-                const g = ctx.createLinearGradient(p.x, p.y, tx, ty);
-                g.addColorStop(0, `rgba(255,255,255,${a})`);
-                g.addColorStop(1, 'rgba(200,220,255,0)');
-                ctx.strokeStyle = g;
+        // Trazos azules anchos: aparecen con el viaje.
+        if (travel > 0.01) {
+            for (const st of strokes) {
+                const p = place(st.x, st.y, offset.stroke);
+                const len = st.len * (0.8 + 0.25 * s);
+                ctx.strokeStyle = `rgba(36,72,226,${st.alpha * travel})`;
                 ctx.lineWidth = st.w;
                 ctx.beginPath();
                 ctx.moveTo(p.x, p.y);
-                ctx.lineTo(tx, ty);
+                ctx.lineTo(p.x - ux * len, p.y - uy * len);
+                ctx.stroke();
+            }
+
+            // Reflejos finos, los más rápidos.
+            for (const st of streaks) {
+                const p = place(st.x, st.y, offset.streak);
+                const len = (30 + 90 * Math.min(s, 3)) * st.len;
+                const g = ctx.createLinearGradient(
+                    p.x,
+                    p.y,
+                    p.x - ux * len,
+                    p.y - uy * len,
+                );
+                g.addColorStop(0, `rgba(255,255,255,${st.alpha * travel})`);
+                g.addColorStop(1, 'rgba(190,210,255,0)');
+                ctx.strokeStyle = g;
+                ctx.lineWidth = 2.6;
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p.x - ux * len, p.y - uy * len);
                 ctx.stroke();
             }
         }
@@ -223,11 +212,13 @@ export function createTravelLayers(
             const step = Math.min(dt, 0.05);
             time += step;
             // Acelera con algo de inercia y frena más despacio.
-            const rate = target > speed ? 2.6 : 1.7;
+            const rate = target > speed ? 2.8 : 1.8;
             speed += (target - speed) * Math.min(1, step * rate);
-            const v = speed * DEPTH.near;
-            offset.x -= Math.cos(heading) * v * step;
-            offset.y -= Math.sin(heading) * v * step;
+            travel = Math.min(1, Math.max(0, (speed - 0.1) / 0.6));
+            offset.glow += DEPTH.glow * speed * step;
+            offset.sparkle += DEPTH.sparkle * (0.15 + speed) * step;
+            offset.stroke += DEPTH.stroke * speed * step;
+            offset.streak += DEPTH.streak * speed * step;
             draw();
         },
         get speed() {
